@@ -1,33 +1,34 @@
-## QUOTA EFFICIENCY
+# AGENTS.md
 
-The project is developed using GLM-5.3 Coding Plan.
+## Project
 
-Minimize unnecessary context and model usage.
+HH Pilot — веб-приложение, которое развивается итеративно через coding agent.
 
-Rules:
+## Rules
 
-1. Do not reread the entire repository for every task.
-2. Inspect only files relevant to the current task.
-3. Reuse existing documentation instead of regenerating it.
-4. Do not repeat unchanged code in reports.
-5. Do not provide long explanations unless requested.
-6. Do not run the entire test suite after every small change.
-7. Run focused tests after local changes.
-8. Run full test suite only at milestone gates.
-9. Do not perform a full security audit after every feature.
-10. Perform targeted security review for the current feature.
-11. Full security audit is reserved for the final hardening stage.
-12. Never regenerate working code unnecessarily.
-13. Make the smallest safe change.
-14. If no code change is required, do not modify files.
-15. Keep completion reports concise.
+- Не удаляй существующую функциональность без явного указания.
+- Перед крупными изменениями изучай текущую структуру проекта.
+- Не добавляй секреты, токены или пароли в Git.
+- Сохраняй рабочее состояние приложения после каждого существенного изменения.
+- Используй TypeScript и существующие соглашения проекта.
+- Перед завершением задачи проверяй, что проект собирается командой `npm run build`.
 
-Default completion report:
+## Development
 
-Implemented:
-Files:
-Tests:
-Security:
-Issues:
+Install dependencies:
 
-Maximum approximately 10-15 lines unless detailed output is necessary.
+```bash
+npm install
+```
+
+Run development server:
+
+```bash
+npm run dev
+```
+
+Build:
+
+```bash
+npm run build
+```
