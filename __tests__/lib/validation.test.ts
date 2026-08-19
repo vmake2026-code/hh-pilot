@@ -1,0 +1,155 @@
+import { describe, it, expect } from "vitest";
+import {
+  validateRequired,
+  validateEmail,
+  validatePhone,
+  validateDateRange,
+  validateWorkExperience,
+  validateEducation,
+  validateStep1,
+  validateStep2,
+  validateStep3,
+  validateStep4,
+} from "../../lib/validation";
+
+describe("validateRequired", () => {
+  it("rejects empty strings", () => {
+    expect(validateRequired("", "Name")).toBe('Поле "Name" обязательно для заполнения');
+    expect(validateRequired("   ", "Name")).toBe('Поле "Name" обязательно для заполнения');
+  });
+
+  it("accepts non-empty strings", () => {
+    expect(validateRequired("hello", "Name")).toBeNull();
+  });
+});
+
+describe("validateEmail", () => {
+  it("rejects empty email", () => {
+    expect(validateEmail("")).toBe("Email обязателен для заполнения");
+  });
+
+  it("rejects invalid format", () => {
+    expect(validateEmail("not-an-email")).toBe("Введите корректный email");
+    expect(validateEmail("@no-local.com")).toBe("Введите корректный email");
+  });
+
+  it("accepts valid email", () => {
+    expect(validateEmail("user@example.com")).toBeNull();
+  });
+});
+
+describe("validatePhone", () => {
+  it("rejects empty phone", () => {
+    expect(validatePhone("")).toBe("Телефон обязателен для заполнения");
+  });
+
+  it("rejects invalid format", () => {
+    expect(validatePhone("123")).toBe("Введите корректный номер телефона");
+  });
+
+  it("accepts valid phone", () => {
+    expect(validatePhone("+79001234567")).toBeNull();
+    expect(validatePhone("8 (900) 123-45-67")).toBeNull();
+  });
+});
+
+describe("validateDateRange", () => {
+  it("requires start date", () => {
+    expect(validateDateRange("", null, "Job")).toBe('Укажите дату начала для "Job"');
+  });
+
+  it("rejects end before start", () => {
+    expect(validateDateRange("2023-01", "2022-01", "Job")).toBe(
+      'Дата окончания не может быть раньше даты начала для "Job"',
+    );
+  });
+
+  it("accepts valid range", () => {
+    expect(validateDateRange("2022-01", "2023-01", "Job")).toBeNull();
+  });
+
+  it("accepts null end date", () => {
+    expect(validateDateRange("2022-01", null, "Job")).toBeNull();
+  });
+});
+
+describe("validateWorkExperience", () => {
+  it("returns errors for empty work entries", () => {
+    const items = [
+      { id: "1", company: "", position: "", startDate: "", endDate: null, isCurrent: false, description: "", achievements: [] },
+    ];
+    const errors = validateWorkExperience(items);
+    expect(errors["work[0].company"]).toBeDefined();
+    expect(errors["work[0].position"]).toBeDefined();
+  });
+
+  it("returns no errors for valid entries", () => {
+    const items = [
+      { id: "1", company: "Google", position: "Dev", startDate: "2022-01", endDate: null, isCurrent: true, description: "", achievements: [] },
+    ];
+    expect(Object.keys(validateWorkExperience(items)).length).toBe(0);
+  });
+});
+
+describe("validateEducation", () => {
+  it("returns errors for empty education entries", () => {
+    const items = [
+      { id: "1", institution: "", degree: "", field: "", startDate: "", endDate: null, description: "" },
+    ];
+    const errors = validateEducation(items);
+    expect(errors["edu[0].institution"]).toBeDefined();
+    expect(errors["edu[0].degree"]).toBeDefined();
+  });
+});
+
+describe("validateStep1", () => {
+  it("requires firstName, lastName, city, phone, email", () => {
+    const result = validateStep1({ firstName: "", lastName: "", city: "", phone: "", email: "" });
+    expect(result.valid).toBe(false);
+    expect(result.errors.firstName).toBeDefined();
+    expect(result.errors.lastName).toBeDefined();
+    expect(result.errors.city).toBeDefined();
+    expect(result.errors.phone).toBeDefined();
+    expect(result.errors.email).toBeDefined();
+  });
+
+  it("passes with valid data", () => {
+    const result = validateStep1({
+      firstName: "Иван",
+      lastName: "Иванов",
+      city: "Москва",
+      phone: "+79001234567",
+      email: "ivan@test.com",
+    });
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe("validateStep2", () => {
+  it("requires desiredPosition", () => {
+    expect(validateStep2({ desiredPosition: "" }).valid).toBe(false);
+  });
+
+  it("passes with position", () => {
+    expect(validateStep2({ desiredPosition: "Developer" }).valid).toBe(true);
+  });
+});
+
+describe("validateStep3", () => {
+  it("passes with empty work experience", () => {
+    expect(validateStep3([]).valid).toBe(true);
+  });
+
+  it("validates work entries", () => {
+    const result = validateStep3([
+      { id: "1", company: "", position: "", startDate: "", endDate: null, isCurrent: false, description: "", achievements: [] },
+    ]);
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe("validateStep4", () => {
+  it("passes with empty education", () => {
+    expect(validateStep4([]).valid).toBe(true);
+  });
+});
