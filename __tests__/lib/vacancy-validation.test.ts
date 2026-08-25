@@ -50,6 +50,35 @@ describe("validateVacancyForm", () => {
     expect(result.valid).toBe(true);
   });
 
+  // ---------- Unified URL policy (source of truth: lib/security.ts isAllowedUrl) ----------
+
+  it("accepts http hh.ru URL", () => {
+    const result = validateVacancyForm({ ...validData, sourceUrl: "http://hh.ru/vacancy/123" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts hh.ru subdomain URL", () => {
+    const result = validateVacancyForm({ ...validData, sourceUrl: "https://api.hh.ru/x" });
+    expect(result.valid).toBe(true);
+  });
+
+  it.each([
+    "https://evil.com/x",
+    "https://hh.ru.evil.com/x",
+    "https://hh.ru@evil.com/x",
+    "http://127.0.0.1/x",
+    "javascript:alert(1)",
+  ])("rejects non-hh.ru sourceUrl %j", (url) => {
+    const result = validateVacancyForm({ ...validData, sourceUrl: url });
+    expect(result.valid).toBe(false);
+    expect(result.errors.sourceUrl).toBeDefined();
+  });
+
+  it("accepts empty sourceUrl (optional field)", () => {
+    const result = validateVacancyForm({ ...validData, sourceUrl: "" });
+    expect(result.valid).toBe(true);
+  });
+
   it("validates salary range", () => {
     const result = validateVacancyForm({ ...validData, salaryFrom: "300000", salaryTo: "100000" });
     expect(result.valid).toBe(false);

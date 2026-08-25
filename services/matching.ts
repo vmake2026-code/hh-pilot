@@ -50,6 +50,7 @@ function matchRequirements(
   resumeSkills: string[],
   resumePositions: string[],
   resumeDescriptions: string[],
+  resumeLanguages: string[] = [],
 ): { matched: MatchedRequirement[]; missing: MatchedRequirement[] } {
   const resumeSkillSet = new Set(resumeSkills.map(normalizeSkill));
   const allResumeText = [...resumePositions, ...resumeDescriptions]
@@ -72,10 +73,20 @@ function matchRequirements(
       }
     }
 
-    if (!isMatch && (req.category === "experience" || req.category === "education")) {
-      if (allResumeText.length > 0) {
+    // Every non-skill category goes through the same word-overlap rule
+    // (same normalization, same >3-char word filter, same >=50% threshold).
+    // Language requirements additionally match against the resume's own
+    // language list; all other categories use the existing haystack only.
+    if (!isMatch && req.category !== "skill") {
+      const haystack =
+        req.category === "language"
+          ? [...resumeLanguages.map((l) => l.toLowerCase()), allResumeText]
+              .filter(Boolean)
+              .join(" ")
+          : allResumeText;
+      if (haystack.length > 0) {
         const reqWords = reqText.split(/\s+/).filter((w) => w.length > 3);
-        const matches = reqWords.filter((w) => allResumeText.includes(w));
+        const matches = reqWords.filter((w) => haystack.includes(w));
         if (matches.length >= Math.ceil(reqWords.length * 0.5)) {
           isMatch = true;
         }
@@ -245,6 +256,7 @@ function calculateMatch(
     resumeSkills,
     resumePositions,
     resumeDescriptions,
+    vd.languages,
   );
   // Edge case: empty vacancy requirements → neutral
   const reqsScore = vacancy.requirements.length > 0

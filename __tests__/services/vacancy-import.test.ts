@@ -629,12 +629,28 @@ describe("isValidImportUrl", () => {
     expect(isValidImportUrl("http://hh.ru/vacancy/123")).toBe(true);
   });
 
+  it("accepts hh.ru subdomain URL", () => {
+    expect(isValidImportUrl("https://api.hh.ru/x")).toBe(true);
+  });
+
   it("rejects invalid URL", () => {
     expect(isValidImportUrl("not-a-url")).toBe(false);
   });
 
   it("rejects ftp protocol", () => {
     expect(isValidImportUrl("ftp://hh.ru/file")).toBe(false);
+  });
+
+  // ---------- Unified URL policy (source of truth: lib/security.ts isAllowedUrl) ----------
+
+  it.each([
+    "https://evil.com/x",
+    "https://hh.ru.evil.com/x",
+    "https://hh.ru@evil.com/x",
+    "http://127.0.0.1/x",
+    "javascript:alert(1)",
+  ])("rejects non-hh.ru URL %j", (url) => {
+    expect(isValidImportUrl(url)).toBe(false);
   });
 
   it("accepts empty URL", () => {

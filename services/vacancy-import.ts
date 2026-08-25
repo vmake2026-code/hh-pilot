@@ -2,6 +2,7 @@ import type { VacancyImportDraft, VacancyImportSource, VacancyRequirement } from
 import { inferField, missingField } from "../types/confirmation";
 import { normalizeSkill } from "../lib/skills";
 import { parseSalaryValue } from "../lib/salary";
+import { isAllowedUrl } from "../lib/security";
 
 
 // ---------- Text normalization ----------
@@ -486,12 +487,8 @@ function draftToVacancy(
 
 function isValidImportUrl(url: string): boolean {
   if (!url?.trim()) return true; // empty is valid (optional)
-  try {
-    const parsed = new URL(url.trim());
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
+  // Unified URL policy: lib/security.ts is the single source of truth.
+  return isAllowedUrl(url.trim());
 }
 
 export {

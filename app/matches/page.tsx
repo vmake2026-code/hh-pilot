@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import { listMatchRecords } from "@/services/match-persistence";
+import { useClientData } from "@/features/use-client-data";
+import Loading from "@/components/ui/loading";
 import { levelLabel } from "@/types/match";
 import type { MatchRecord } from "@/types/match";
 
 export default function MatchesHistoryPage() {
-  const records: MatchRecord[] = listMatchRecords();
+  const { data, ready } = useClientData(listMatchRecords);
+
+  if (!ready || data === null) {
+    return <Loading />;
+  }
+
+  const records: MatchRecord[] = data;
 
   return (
     <main className="page-wide">

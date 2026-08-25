@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import { listVacancies } from "@/services/vacancy-persistence";
+import { useClientData } from "@/features/use-client-data";
+import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS } from "@/types/candidate";
 import type { Vacancy } from "@/types/vacancy";
 
 export default function VacanciesPage() {
-  const vacancies: Vacancy[] = listVacancies();
+  const { data, ready } = useClientData(listVacancies);
+
+  if (!ready || data === null) {
+    return <Loading />;
+  }
+
+  const vacancies: Vacancy[] = data;
 
   return (
     <main className="page-wide">

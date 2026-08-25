@@ -1,10 +1,11 @@
 "use client";
 
-import { use } from "react";
+import { use, useCallback } from "react";
 import Link from "next/link";
 import { getMatchRecord } from "@/services/match-persistence";
+import { useClientData } from "@/features/use-client-data";
+import Loading from "@/components/ui/loading";
 import { levelLabel } from "@/types/match";
-import type { MatchRecord } from "@/types/match";
 
 export default function MatchDetailPage({
   params,
@@ -12,7 +13,12 @@ export default function MatchDetailPage({
   params: Promise<{ matchId: string }>;
 }) {
   const { matchId } = use(params);
-  const record: MatchRecord | null = getMatchRecord(matchId);
+  const loadRecord = useCallback(() => getMatchRecord(matchId), [matchId]);
+  const { data: record, ready } = useClientData(loadRecord);
+
+  if (!ready) {
+    return <Loading />;
+  }
 
   if (!record) {
     return (

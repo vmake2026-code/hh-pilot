@@ -1,4 +1,5 @@
 import { parseSalaryValue } from "./salary";
+import { isAllowedUrl } from "./security";
 
 type VacancyErrors = Record<string, string>;
 
@@ -28,15 +29,10 @@ function validateVacancyForm(data: {
     errors.description = "Описание обязательно";
   }
 
-  if (data.sourceUrl.trim()) {
-    try {
-      const url = new URL(data.sourceUrl.trim());
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        errors.sourceUrl = "URL должен начинаться с http:// или https://";
-      }
-    } catch {
-      errors.sourceUrl = "Введите корректный URL";
-    }
+  // Unified URL policy: the allowlist in lib/security.ts is the single
+  // source of truth (http/https, hh.ru and its subdomains only).
+  if (data.sourceUrl.trim() && !isAllowedUrl(data.sourceUrl.trim())) {
+    errors.sourceUrl = "Разрешены только ссылки на hh.ru";
   }
 
   // Salary validation (same semantics as the import parser).

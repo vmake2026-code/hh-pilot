@@ -130,6 +130,94 @@ describe("matchRequirements", () => {
     );
     expect(r.matched.length).toBe(0);
   });
+
+  it("backward compatible: called without resumeLanguages argument", () => {
+    const r = matchRequirements(
+      [
+        { id: "r1", text: "Английский B2", isRequired: true, category: "language" },
+        { id: "r2", text: "React experience", isRequired: true, category: "skill" },
+      ],
+      ["react"], ["Frontend Developer"], ["Разработка React приложений"],
+    );
+    expect(r.matched.map((m) => m.requirementId)).toEqual(["r2"]);
+    expect(r.missing.map((m) => m.requirementId)).toEqual(["r1"]);
+  });
+
+  it("language matched against resume languages", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Английский B2", isRequired: true, category: "language" }],
+      [], [], [],
+      ["Английский"],
+    );
+    expect(r.matched.length).toBe(1);
+    expect(r.missing.length).toBe(0);
+  });
+
+  it("language missing when resume has no matching language", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Английский B2", isRequired: true, category: "language" }],
+      [], [], [],
+      [],
+    );
+    expect(r.missing.length).toBe(1);
+  });
+
+  it("language not auto-matched without actual correspondence", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Владение китайским языком", isRequired: true, category: "language" }],
+      [], [], [],
+      ["Английский"],
+    );
+    expect(r.matched.length).toBe(0);
+  });
+
+  it("soft_skill matched via description overlap", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Менторство и наставничество джунов", isRequired: true, category: "soft_skill" }],
+      [], [], ["Менторство джунов и код-ревью"],
+    );
+    expect(r.matched.length).toBe(1);
+  });
+
+  it("soft_skill missing without overlap", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Менторство и наставничество джунов", isRequired: true, category: "soft_skill" }],
+      [], [], ["Продажи и переговоры"],
+    );
+    expect(r.missing.length).toBe(1);
+  });
+
+  it("other matched via word overlap", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Работа в команде продукта", isRequired: true, category: "other" }],
+      [], [], ["Работа в команде разработки"],
+    );
+    expect(r.matched.length).toBe(1);
+  });
+
+  it("other with empty haystack stays missing", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Работа в команде продукта", isRequired: true, category: "other" }],
+      [], [], [],
+    );
+    expect(r.missing.length).toBe(1);
+  });
+
+  it("undefined category matched via word overlap", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Разработка API интерфейсов", isRequired: true }],
+      [], [], ["Разработка внутренних интерфейсов"],
+    );
+    expect(r.matched.length).toBe(1);
+  });
+
+  it("undefined category missing without overlap", () => {
+    const r = matchRequirements(
+      [{ id: "r1", text: "Разработка API интерфейсов", isRequired: true }],
+      [], [], ["Продажи и переговоры"],
+    );
+    expect(r.missing.length).toBe(1);
+  });
 });
 
 // ---------- Experience matching ----------
@@ -272,6 +360,24 @@ describe("calculateMatch score", () => {
     const vac = makeVacancy({ requirements: [] });
     const r = calculateMatch(vac, makeVersion(), "res1");
     expect(r.overallScore).toBeLessThan(95);
+  });
+
+  it("language requirement raises score when resume lists the language", () => {
+    const vac = makeVacancy({
+      skills: [],
+      requirements: [
+        { id: "lang", text: "Английский B2", isRequired: true, category: "language" },
+      ],
+    });
+    const withLang = makeVersion({ languages: ["Английский"] });
+    const withoutLang = makeVersion({ languages: [] });
+
+    const rWith = calculateMatch(vac, withLang, "res1");
+    const rWithout = calculateMatch(vac, withoutLang, "res1");
+
+    expect(rWith.matchedRequirements.length).toBe(1);
+    expect(rWithout.missingRequirements.length).toBe(1);
+    expect(rWith.overallScore).toBeGreaterThan(rWithout.overallScore);
   });
 
   it("no experience → risk when vacancy requires years", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useCallback } from "react";
+import { use, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { getVacancy } from "@/services/vacancy-persistence";
 import { listResumeRecords } from "@/services/resume-persistence";
@@ -8,6 +8,8 @@ import { useRouter } from "next/navigation";
 import { calculateMatch } from "@/services/matching";
 import { toMatchRecord, levelLabel } from "@/types/match";
 import { saveMatchRecord } from "@/services/match-persistence";
+import { useClientData } from "@/features/use-client-data";
+import Loading from "@/components/ui/loading";
 import type { Vacancy } from "@/types/vacancy";
 import type { ResumeRecord, ResumeVersion } from "@/types/resume";
 import type { MatchResult } from "@/types/match";
@@ -18,12 +20,20 @@ export default function MatchPage({
   params: Promise<{ vacancyId: string }>;
 }) {
   const { vacancyId } = use(params);
-  const vacancy: Vacancy | null = getVacancy(vacancyId);
-  const allRecords: ResumeRecord[] = listResumeRecords();
+  const loadVacancy = useCallback(() => getVacancy(vacancyId), [vacancyId]);
+  const vacancyResult = useClientData(loadVacancy);
+  const recordsResult = useClientData(listResumeRecords);
 
   const router = useRouter();
   const [selectedResumeId, setSelectedResumeId] = useState<string>("");
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
+
+  const dataReady = vacancyResult.ready && recordsResult.ready;
+  const vacancy: Vacancy | null = vacancyResult.data;
+  const allRecords: ResumeRecord[] = useMemo(
+    () => recordsResult.data ?? [],
+    [recordsResult.data],
+  );
 
   const handleCalculate = useCallback(() => {
     if (!vacancy || !selectedResumeId) return;
@@ -51,6 +61,10 @@ export default function MatchPage({
     saveMatchRecord(matchRecord);
     router.push(`/matches/${matchRecord.id}`);
   }, [vacancy, selectedResumeId, allRecords, router]);
+
+  if (!dataReady) {
+    return <Loading />;
+  }
 
   if (!vacancy) {
     return (

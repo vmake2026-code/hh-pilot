@@ -1,10 +1,11 @@
 "use client";
 
-import { use } from "react";
+import { use, useCallback } from "react";
 import Link from "next/link";
 import { getVacancy } from "@/services/vacancy-persistence";
+import { useClientData } from "@/features/use-client-data";
+import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
-import type { Vacancy } from "@/types/vacancy";
 
 export default function VacancyDetailPage({
   params,
@@ -12,7 +13,12 @@ export default function VacancyDetailPage({
   params: Promise<{ vacancyId: string }>;
 }) {
   const { vacancyId } = use(params);
-  const vacancy: Vacancy | null = getVacancy(vacancyId);
+  const loadVacancy = useCallback(() => getVacancy(vacancyId), [vacancyId]);
+  const { data: vacancy, ready } = useClientData(loadVacancy);
+
+  if (!ready) {
+    return <Loading />;
+  }
 
   if (!vacancy) {
     return (

@@ -50,11 +50,9 @@ class LocalStorageStore<T> implements PersistenceStore<T> {
 
   set(key: string, value: T): void {
     if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(this.prefix + key, JSON.stringify(value));
-    } catch {
-      // quota exceeded or private browsing — silently ignore
-    }
+    // Write failures (QuotaExceededError, SecurityError, …) must propagate:
+    // swallowing them would let save flows report success while losing data.
+    window.localStorage.setItem(this.prefix + key, JSON.stringify(value));
   }
 
   remove(key: string): void {

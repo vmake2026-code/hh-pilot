@@ -1,10 +1,11 @@
 "use client";
 
-import { use } from "react";
+import { use, useCallback } from "react";
 import Link from "next/link";
 import { getResumeRecord } from "@/services/resume-persistence";
+import { useClientData } from "@/features/use-client-data";
+import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
-import type { ResumeRecord } from "@/types/resume";
 
 export default function ResumeDetailPage({
   params,
@@ -12,7 +13,12 @@ export default function ResumeDetailPage({
   params: Promise<{ resumeId: string }>;
 }) {
   const { resumeId } = use(params);
-  const record: ResumeRecord | null = getResumeRecord(resumeId);
+  const loadRecord = useCallback(() => getResumeRecord(resumeId), [resumeId]);
+  const { data: record, ready } = useClientData(loadRecord);
+
+  if (!ready) {
+    return <Loading />;
+  }
 
   if (!record) {
     return (
