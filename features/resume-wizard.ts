@@ -50,6 +50,90 @@ const REQUIRED_FIELDS: { path: string; label: string }[] = [
   { path: "desiredPosition", label: "Желаемая должность" },
 ];
 
+// ---------- Draft persistence (context-aware envelope) ----------
+
+const DRAFT_KEY_PREFIX = "resume-draft:";
+const DRAFT_CONTEXT_NEW = "new";
+
+/** Serializable draft snapshot bound to a single resume context. */
+interface WizardDraftState {
+  data: WizardData;
+  step: number;
+  confirmedFields: string[];
+}
+
+/** "resume-draft:new" for creation, "resume-draft:<resumeId>" for editing. */
+function draftKeyFor(context: string): string {
+  return DRAFT_KEY_PREFIX + context;
+}
+
+function createDraftState(
+  data: WizardData,
+  step: number,
+  confirmedFields: Set<string>,
+): WizardDraftState {
+  return {
+    data,
+    step,
+    confirmedFields: [...confirmedFields],
+  };
+}
+
+function looksLikeWizardData(value: unknown): value is WizardData {
+  if (typeof value !== "object" || value === null) return false;
+  const o = value as Record<string, unknown>;
+  return (
+    typeof o.firstName === "string" &&
+    typeof o.lastName === "string" &&
+    typeof o.desiredPosition === "string" &&
+    Array.isArray(o.workExperience) &&
+    Array.isArray(o.education) &&
+    Array.isArray(o.skills) &&
+    Array.isArray(o.languages)
+  );
+}
+
+/**
+ * Accepts the current envelope { data, step, confirmedFields } and the
+ * legacy bare-WizardData format. Returns null for anything unusable.
+ * Step is clamped into [1..WIZARD_STEPS.length]; unknown fields are
+ * backfilled from defaults.
+ */
+function normalizeDraft(raw: unknown): WizardDraftState | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+
+  let payload: unknown = obj;
+  if (
+    typeof obj.data === "object" &&
+    obj.data !== null &&
+    looksLikeWizardData(obj.data)
+  ) {
+    payload = obj.data;
+  }
+
+  if (!looksLikeWizardData(payload)) return null;
+
+  const stepRaw = obj.step;
+  const step =
+    typeof stepRaw === "number" &&
+    Number.isInteger(stepRaw) &&
+    stepRaw >= 1 &&
+    stepRaw <= WIZARD_STEPS.length
+      ? stepRaw
+      : 1;
+
+  const confirmedFields = Array.isArray(obj.confirmedFields)
+    ? obj.confirmedFields.filter((f): f is string => typeof f === "string")
+    : [];
+
+  return {
+    data: { ...createDefaultWizardData(), ...(payload as WizardData) },
+    step,
+    confirmedFields,
+  };
+}
+
 // ---------- Fact-check ----------
 
 interface FieldCheck {
@@ -343,10 +427,11 @@ function createNewVersion(
   return version;
 }
 
-export type { WizardData, WizardStep, FieldCheck, FinalizeResult };
+export type { WizardData, WizardStep, FieldCheck, FinalizeResult, WizardDraftState };
 export {
   WIZARD_STEPS,
   REQUIRED_FIELDS,
+  DRAFT_CONTEXT_NEW,
   createDefaultWizardData,
   createEmptyWorkExperience,
   createEmptyEducation,
@@ -359,4 +444,7 @@ export {
   resumeRecordToWizardData,
   loadForEdit,
   createNewVersion,
+  draftKeyFor,
+  createDraftState,
+  normalizeDraft,
 };

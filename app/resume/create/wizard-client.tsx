@@ -2,8 +2,10 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
   WIZARD_STEPS,
+  DRAFT_CONTEXT_NEW,
   createDefaultWizardData,
   createEmptyWorkExperience,
   createEmptyEducation,
@@ -13,6 +15,9 @@ import {
   finalizeResume,
   loadForEdit,
   createNewVersion,
+  draftKeyFor,
+  createDraftState,
+  normalizeDraft,
   type WizardData,
   type WizardStep,
 } from "@/features/resume-wizard";
@@ -21,12 +26,12 @@ import type { WorkExperience, Education } from "@/types/resume";
 import WizardProgress from "@/components/wizard/progress";
 import WizardLayout from "@/components/wizard/wizard-layout";
 import FormField from "@/components/ui/form-field";
+import Loading from "@/components/ui/loading";
 import { createPersistenceStore } from "@/lib/persistence";
 import { getResumeRecord } from "@/services/resume-persistence";
 import { sanitizeText } from "@/lib/security";
 
-const PERSISTENCE_KEY = "resume-draft";
-const store = createPersistenceStore<WizardData>();
+const draftStore = createPersistenceStore<unknown>();
 
 const TOTAL_STEPS = WIZARD_STEPS.length;
 
@@ -52,31 +57,57 @@ export default function WizardClient() {
   const [draftSaved, setDraftSaved] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [currentResumeId, setCurrentResumeId] = useState<string | null>(null);
+  const [booted, setBooted] = useState(false);
+  const [notFound, setNotFound] = useState(false);
 
   // Load draft or existing resume on mount
   useEffect(() => {
     if (editResumeId) {
       const loaded = loadForEdit(editResumeId);
       if (loaded) {
-        setData(loaded.wizardData);
-        setConfirmedFields(new Set(loaded.record.confirmedFields));
         setEditMode(true);
         setCurrentResumeId(editResumeId);
+        // A draft saved for THIS resume wins over its persisted state.
+        const savedDraft = normalizeDraft(
+          draftStore.get(draftKeyFor(editResumeId)),
+        );
+        if (savedDraft) {
+          setData(savedDraft.data);
+          setStep(savedDraft.step as WizardStep);
+          setConfirmedFields(new Set(savedDraft.confirmedFields));
+        } else {
+          setData(loaded.wizardData);
+          setStep(1);
+          setConfirmedFields(new Set(loaded.record.confirmedFields));
+        }
+        setBooted(true);
         return;
       }
+      // Unknown or deleted resume id: never fall back to create mode.
+      setNotFound(true);
+      setBooted(true);
+      return;
     }
-    const saved = store.get(PERSISTENCE_KEY);
-    if (saved) {
-      setData(saved);
-      setStep(1);
+    const savedDraft = normalizeDraft(draftStore.get(draftKeyFor(DRAFT_CONTEXT_NEW)));
+    if (savedDraft) {
+      setData(savedDraft.data);
+      setStep(savedDraft.step as WizardStep);
+      setConfirmedFields(new Set(savedDraft.confirmedFields));
     }
+    setBooted(true);
   }, [editResumeId]);
 
+  const draftContext =
+    editMode && currentResumeId ? currentResumeId : DRAFT_CONTEXT_NEW;
+
   const saveDraft = useCallback(() => {
-    store.set(PERSISTENCE_KEY, data);
+    draftStore.set(
+      draftKeyFor(draftContext),
+      createDraftState(data, step, confirmedFields),
+    );
     setDraftSaved(true);
     setTimeout(() => setDraftSaved(false), 2000);
-  }, [data]);
+  }, [data, step, confirmedFields, draftContext]);
 
   const updateField = useCallback(
     (field: keyof WizardData, value: string) => {
@@ -123,14 +154,14 @@ export default function WizardClient() {
       const existing = getResumeRecord(currentResumeId);
       if (existing) {
         createNewVersion(data, existing, confirmedFields);
-        store.remove(PERSISTENCE_KEY);
+        draftStore.remove(draftKeyFor(currentResumeId));
         router.push(`/resume/${currentResumeId}/preview`);
         return;
       }
     }
 
     const { record } = finalizeResume(data, confirmedFields);
-    store.remove(PERSISTENCE_KEY);
+    draftStore.remove(draftKeyFor(DRAFT_CONTEXT_NEW));
     router.push(`/resume/${record.id}/preview`);
   }, [data, confirmedFields, router, editMode, currentResumeId]);
 
@@ -215,6 +246,24 @@ export default function WizardClient() {
   const stepTitle = WIZARD_STEPS[step - 1]?.title ?? "";
   const factChecks = buildFactChecks(data, confirmedFields);
   const finalizeCheck = canFinalize(data, confirmedFields);
+
+  if (!booted) {
+    return <Loading />;
+  }
+
+  if (notFound) {
+    return (
+      <main className="page-wide">
+        <div className="stub-section">
+          <h1>Резюме не найдено</h1>
+          <p>Запрашиваемое резюме не существует или было удалено.</p>
+          <Link href="/resume" className="btn btn-primary btn-md">
+            К списку резюме
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="page-wide">

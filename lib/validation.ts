@@ -21,12 +21,34 @@ function validatePhone(phone: string): string | null {
   return null;
 }
 
+const MONTH_YEAR_PATTERN = /^(0[1-9]|1[0-2])\/\d{4}$/;
+
+/** Strict MM/YYYY format: month 01-12, 4-digit year. */
+function isValidMonthYear(value: string): boolean {
+  return MONTH_YEAR_PATTERN.test(value.trim());
+}
+
+function toMonthYear(value: string): { month: number; year: number } {
+  const [monthPart, yearPart] = value.trim().split("/");
+  return { month: parseInt(monthPart, 10), year: parseInt(yearPart, 10) };
+}
+
 function validateDateRange(start: string, end: string | null, label: string): string | null {
   if (!start) return `Укажите дату начала для "${label}"`;
+  if (!isValidMonthYear(start)) {
+    return `Дата начала должна быть в формате ММ/ГГГГ для "${label}"`;
+  }
   if (end) {
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    if (endDate < startDate) {
+    if (!isValidMonthYear(end)) {
+      return `Дата окончания должна быть в формате ММ/ГГГГ для "${label}"`;
+    }
+    // new Date("MM/YYYY") is an Invalid Date in JS — compare parts directly.
+    const startDate = toMonthYear(start);
+    const endDate = toMonthYear(end);
+    if (
+      endDate.year < startDate.year ||
+      (endDate.year === startDate.year && endDate.month < startDate.month)
+    ) {
       return `Дата окончания не может быть раньше даты начала для "${label}"`;
     }
   }
@@ -143,6 +165,7 @@ export {
   validateRequired,
   validateEmail,
   validatePhone,
+  isValidMonthYear,
   validateDateRange,
   validateWorkExperience,
   validateEducation,

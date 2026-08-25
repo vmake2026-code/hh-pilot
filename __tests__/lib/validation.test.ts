@@ -3,6 +3,7 @@ import {
   validateRequired,
   validateEmail,
   validatePhone,
+  isValidMonthYear,
   validateDateRange,
   validateWorkExperience,
   validateEducation,
@@ -59,17 +60,64 @@ describe("validateDateRange", () => {
   });
 
   it("rejects end before start", () => {
-    expect(validateDateRange("2023-01", "2022-01", "Job")).toBe(
+    expect(validateDateRange("12/2023", "11/2022", "Job")).toBe(
       'Дата окончания не может быть раньше даты начала для "Job"',
     );
   });
 
   it("accepts valid range", () => {
-    expect(validateDateRange("2022-01", "2023-01", "Job")).toBeNull();
+    expect(validateDateRange("11/2022", "12/2023", "Job")).toBeNull();
   });
 
   it("accepts null end date", () => {
-    expect(validateDateRange("2022-01", null, "Job")).toBeNull();
+    expect(validateDateRange("11/2022", null, "Job")).toBeNull();
+  });
+
+  // ---------- Strict MM/YYYY format policy ----------
+
+  it.each(["01/2020", "12/2025", "09/1999"])("accepts MM/YYYY %j", (date) => {
+    expect(validateDateRange(date, null, "Job")).toBeNull();
+  });
+
+  it.each([
+    "1/2020",
+    "13/2020",
+    "00/2020",
+    "12/20",
+    "2020/12",
+    "abc",
+    "13/x",
+    "2022-01",
+  ])("rejects non-MM/YYYY %j", (date) => {
+    expect(validateDateRange(date, null, "Job")).toBe(
+      'Дата начала должна быть в формате ММ/ГГГГ для "Job"',
+    );
+  });
+
+  it("rejects malformed end date format", () => {
+    expect(validateDateRange("01/2020", "13/2020", "Job")).toBe(
+      'Дата окончания должна быть в формате ММ/ГГГГ для "Job"',
+    );
+  });
+});
+
+describe("isValidMonthYear", () => {
+  it.each(["01/2020", "09/1999", "12/2025"])("accepts %j", (date) => {
+    expect(isValidMonthYear(date)).toBe(true);
+  });
+
+  it.each([
+    "1/2020",
+    "13/2020",
+    "00/2020",
+    "12/20",
+    "2020/12",
+    "abc",
+    "13/x",
+    "",
+    "01/2020/01",
+  ])("rejects %j", (date) => {
+    expect(isValidMonthYear(date)).toBe(false);
   });
 });
 
@@ -85,7 +133,7 @@ describe("validateWorkExperience", () => {
 
   it("returns no errors for valid entries", () => {
     const items = [
-      { id: "1", company: "Google", position: "Dev", startDate: "2022-01", endDate: null, isCurrent: true, description: "", achievements: [] },
+      { id: "1", company: "Google", position: "Dev", startDate: "01/2022", endDate: null, isCurrent: true, description: "", achievements: [] },
     ];
     expect(Object.keys(validateWorkExperience(items)).length).toBe(0);
   });
