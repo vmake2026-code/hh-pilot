@@ -8,7 +8,10 @@ import { saveVacancy } from "@/services/vacancy-persistence";
 import {
   parseVacancyImport,
   isValidImportUrl,
+  classifyRequirementCategory,
+  parseSalaryValue,
 } from "@/services/vacancy-import";
+import { validateVacancyForm, type VacancyErrors } from "@/lib/vacancy-validation";
 import { sanitizeText } from "@/lib/security";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
 import type { WorkFormat, EmploymentType } from "@/types/candidate";
@@ -30,6 +33,7 @@ export default function VacancyImportPage() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [rawText, setRawText] = useState("");
   const [urlError, setUrlError] = useState("");
+  const [saveErrors, setSaveErrors] = useState<VacancyErrors>({});
   const [draft, setDraft] = useState<VacancyImportDraft | null>(null);
 
   // Editable fields in preview
@@ -53,6 +57,7 @@ export default function VacancyImportPage() {
       return;
     }
     setUrlError("");
+    setSaveErrors({});
 
     const source = sourceUrl.trim() ? "url" : "text";
     const parsed = parseVacancyImport({
@@ -88,8 +93,30 @@ export default function VacancyImportPage() {
     const reqList = requirementsText.split("\n").map((s) => s.trim()).filter(Boolean);
     const respList = responsibilitiesText.split("\n").map((s) => s.trim()).filter(Boolean);
 
+    // Reuse the existing manual-form validation: invalid input blocks the save
+    const validation = validateVacancyForm({
+      title,
+      company,
+      location,
+      description,
+      salaryFrom,
+      salaryTo,
+      sourceUrl: draft.sourceUrl,
+      skills: skillList,
+      requirements: reqList,
+      responsibilities: respList,
+    });
+    if (!validation.valid) {
+      setSaveErrors(validation.errors);
+      return;
+    }
+    setSaveErrors({});
+
     const now = new Date().toISOString();
     const id = generateId();
+
+    const parsedSalaryFrom = parseSalaryValue(salaryFrom);
+    const parsedSalaryTo = parseSalaryValue(salaryTo);
 
     const vacancy = {
       id,
@@ -98,20 +125,20 @@ export default function VacancyImportPage() {
       location: sanitizeText(location),
       workFormat: workFormat ? (workFormat as WorkFormat) : undefined,
       employmentType: employmentType ? (employmentType as EmploymentType) : undefined,
-      salaryFrom: salaryFrom ? parseFloat(salaryFrom) : undefined,
-      salaryTo: salaryTo ? parseFloat(salaryTo) : undefined,
+      salaryFrom: parsedSalaryFrom,
+      salaryTo: parsedSalaryTo,
       currency: currency || undefined,
-      salary: salaryFrom
-        ? `от ${salaryFrom} ${currency}${salaryTo ? ` до ${salaryTo}` : ""}`
-        : salaryTo
-          ? `до ${salaryTo} ${currency}`
+      salary: parsedSalaryFrom !== undefined
+        ? `от ${parsedSalaryFrom} ${currency}${parsedSalaryTo !== undefined ? ` до ${parsedSalaryTo}` : ""}`
+        : parsedSalaryTo !== undefined
+          ? `до ${parsedSalaryTo} ${currency}`
           : undefined,
       description: sanitizeText(description),
       requirements: reqList.map((text, i) => ({
         id: `req-${id}-${i}`,
         text,
         isRequired: true,
-        category: "skill" as const,
+        category: classifyRequirementCategory(text),
       })),
       skills: skillList,
       responsibilities: respList,
@@ -220,6 +247,7 @@ export default function VacancyImportPage() {
             value={title}
             required
             placeholder="Frontend Developer"
+            error={saveErrors.title}
             onChange={setTitle}
           />
           <FormField
@@ -227,6 +255,7 @@ export default function VacancyImportPage() {
             name="company"
             value={company}
             placeholder="ООО Ромашка"
+            error={saveErrors.company}
             onChange={setCompany}
           />
           <FormField
@@ -242,6 +271,7 @@ export default function VacancyImportPage() {
               name="salaryFrom"
               value={salaryFrom}
               placeholder="150000"
+              error={saveErrors.salaryFrom}
               onChange={setSalaryFrom}
             />
             <FormField
@@ -249,6 +279,7 @@ export default function VacancyImportPage() {
               name="salaryTo"
               value={salaryTo}
               placeholder="250000"
+              error={saveErrors.salaryTo}
               onChange={setSalaryTo}
             />
           </div>
@@ -285,6 +316,7 @@ export default function VacancyImportPage() {
             required
             placeholder="Опишите вакансию..."
             rows={5}
+            error={saveErrors.description}
             onChange={setDescription}
           />
           <FormField

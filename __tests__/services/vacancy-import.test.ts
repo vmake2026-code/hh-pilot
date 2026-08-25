@@ -4,6 +4,8 @@ import {
   parseVacancyImport,
   draftToVacancy,
   isValidImportUrl,
+  classifyRequirementCategory,
+  parseSalaryValue,
   extractTitle,
   extractCompany,
   extractLocation,
@@ -720,5 +722,119 @@ describe("normalizeSkill", () => {
 
   it("preserves unknown skills", () => {
     expect(normalizeSkill("CustomFramework")).toBe("customframework");
+  });
+});
+
+// ---------- classifyRequirementCategory (Stage 6) ----------
+
+describe("classifyRequirementCategory", () => {
+  it("опыт работы → experience", () => {
+    expect(classifyRequirementCategory("Опыт работы от 3 лет")).toBe("experience");
+  });
+
+  it("стаж → experience", () => {
+    expect(classifyRequirementCategory("Стаж работы в тестировании")).toBe("experience");
+  });
+
+  it("years of experience → experience", () => {
+    expect(classifyRequirementCategory("3+ years of experience")).toBe("experience");
+  });
+
+  it("высшее образование → education", () => {
+    expect(classifyRequirementCategory("Высшее образование")).toBe("education");
+  });
+
+  it("диплом → education", () => {
+    expect(classifyRequirementCategory("Диплом инженера")).toBe("education");
+  });
+
+  it("bachelor degree → education", () => {
+    expect(classifyRequirementCategory("Bachelor degree in Computer Science")).toBe("education");
+  });
+
+  it("знание React → skill (default)", () => {
+    expect(classifyRequirementCategory("Знание React")).toBe("skill");
+  });
+
+  it("знание Docker и Kubernetes → skill", () => {
+    expect(classifyRequirementCategory("Знание Docker и Kubernetes")).toBe("skill");
+  });
+
+  it("знание английского языка → language", () => {
+    expect(classifyRequirementCategory("Знание английского языка")).toBe("language");
+  });
+
+  it("английский B2 → language", () => {
+    expect(classifyRequirementCategory("Английский язык на уровне B2")).toBe("language");
+  });
+
+  it("English (English only) → language", () => {
+    expect(classifyRequirementCategory("Upper-intermediate English")).toBe("language");
+  });
+
+  it("владение немецким языком → language", () => {
+    expect(classifyRequirementCategory("Владение немецким языком")).toBe("language");
+  });
+
+  it("языки программирования НЕ классифицируются как language", () => {
+    expect(classifyRequirementCategory("Знание языков программирования")).toBe("skill");
+  });
+
+  it("опыт + образование: опыт побеждает (первое правило)", () => {
+    expect(classifyRequirementCategory("Опыт работы от 2 лет, высшее образование")).toBe("experience");
+  });
+
+  it("пустая строка → skill (default)", () => {
+    expect(classifyRequirementCategory("")).toBe("skill");
+  });
+
+  it("не-строка → skill (default, без throw)", () => {
+    expect(classifyRequirementCategory(undefined as unknown as string)).toBe("skill");
+    expect(classifyRequirementCategory(null as unknown as string)).toBe("skill");
+  });
+});
+
+// ---------- parseSalaryValue (Stage 6, NaN regression) ----------
+
+describe("parseSalaryValue", () => {
+  it("undefined → undefined", () => {
+    expect(parseSalaryValue(undefined)).toBeUndefined();
+  });
+
+  it("null → undefined", () => {
+    expect(parseSalaryValue(null)).toBeUndefined();
+  });
+
+  it("empty string → undefined", () => {
+    expect(parseSalaryValue("")).toBeUndefined();
+    expect(parseSalaryValue("   ")).toBeUndefined();
+  });
+
+  it("invalid string → undefined (никогда не NaN)", () => {
+    expect(parseSalaryValue("abc")).toBeUndefined();
+    expect(Number.isNaN(parseSalaryValue("abc"))).toBe(false);
+  });
+
+  it("malformed input → undefined", () => {
+    expect(parseSalaryValue("12abc")).toBeUndefined();
+    expect(parseSalaryValue("150 000р")).toBeUndefined();
+    expect(parseSalaryValue("от 150")).toBeUndefined();
+    expect(parseSalaryValue("-100")).toBeUndefined();
+    expect(parseSalaryValue("1e7")).toBeUndefined();
+    expect(parseSalaryValue("Infinity")).toBeUndefined();
+  });
+
+  it("valid number → number", () => {
+    expect(parseSalaryValue("150000")).toBe(150000);
+    expect(parseSalaryValue("150 000")).toBe(150000); // пробелы как разделитель разрядов
+  });
+
+  it("zero → 0 (валидное число)", () => {
+    expect(parseSalaryValue("0")).toBe(0);
+  });
+
+  it("decimal с запятой и точкой", () => {
+    expect(parseSalaryValue("150000,50")).toBe(150000.5);
+    expect(parseSalaryValue("150000.50")).toBe(150000.5);
   });
 });

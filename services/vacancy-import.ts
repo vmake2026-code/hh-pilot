@@ -1,5 +1,7 @@
-import type { VacancyImportDraft, VacancyImportSource } from "../types/vacancy";
+import type { VacancyImportDraft, VacancyImportSource, VacancyRequirement } from "../types/vacancy";
 import { inferField, missingField } from "../types/confirmation";
+import { normalizeSkill } from "../lib/skills";
+import { parseSalaryValue } from "../lib/salary";
 
 
 // ---------- Text normalization ----------
@@ -249,101 +251,7 @@ function extractEmploymentType(text: string): string {
 }
 
 // ---------- Skills ----------
-
-// Canonical aliases: normalize common variations to a single canonical name
-const SKILL_CANONICAL: Record<string, string> = {
-  "react": "react",
-  "react.js": "react",
-  "reactjs": "react",
-  "angular": "angular",
-  "angular.js": "angular",
-  "angularjs": "angular",
-  "vue": "vue",
-  "vue.js": "vue",
-  "vuejs": "vue",
-  "next": "nextjs",
-  "next.js": "nextjs",
-  "nextjs": "nextjs",
-  "nuxt": "nuxtjs",
-  "nuxt.js": "nuxtjs",
-  "nuxtjs": "nuxtjs",
-  "typescript": "typescript",
-  "javascript": "javascript",
-  "node": "node",
-  "node.js": "node",
-  "nodejs": "node",
-  "python": "python",
-  "java": "java",
-  "go": "go",
-  "golang": "go",
-  "rust": "rust",
-  "php": "php",
-  "ruby": "ruby",
-  "c#": "csharp",
-  "csharp": "csharp",
-  "swift": "swift",
-  "kotlin": "kotlin",
-  "postgresql": "postgresql",
-  "postgres": "postgresql",
-  "psql": "postgresql",
-  "mysql": "mysql",
-  "mongodb": "mongodb",
-  "mongo": "mongodb",
-  "redis": "redis",
-  "elasticsearch": "elasticsearch",
-  "docker": "docker",
-  "kubernetes": "kubernetes",
-  "k8s": "kubernetes",
-  "terraform": "terraform",
-  "aws": "aws",
-  "gcp": "gcp",
-  "azure": "azure",
-  "git": "git",
-  "github": "git",
-  "gitlab": "git",
-  "html": "html",
-  "css": "css",
-  "sass": "sass",
-  "scss": "sass",
-  "tailwind": "tailwind",
-  "tailwindcss": "tailwind",
-  "bootstrap": "bootstrap",
-  "graphql": "graphql",
-  "rest": "rest",
-  "grpc": "grpc",
-  "websockets": "websockets",
-  "figma": "figma",
-  "sketch": "sketch",
-  "jest": "jest",
-  "vitest": "vitest",
-  "mocha": "mocha",
-  "cypress": "cypress",
-  "playwright": "playwright",
-  "webpack": "webpack",
-  "vite": "vite",
-  "babel": "babel",
-  "jira": "jira",
-  "confluence": "confluence",
-  "agile": "agile",
-  "scrum": "scrum",
-  "linux": "linux",
-  "bash": "bash",
-  "ci/cd": "cicd",
-  "jenkins": "jenkins",
-  "excel": "excel",
-  "microsoft excel": "excel",
-  "ms excel": "excel",
-  "google sheets": "google_sheets",
-  "powerpoint": "powerpoint",
-};
-
-function normalizeSkill(raw: string): string {
-  let s = raw.toLowerCase().trim().replace(/\s+/g, " ");
-  // Remove dots, dashes (but preserve slash for ci/cd)
-  s = s.replace(/[.\-]/g, "");
-  s = s.replace(/\s+/g, " ").trim();
-  return SKILL_CANONICAL[s] ?? s;
-}
+// Skill normalization is unified in lib/skills.ts (shared with the matching engine).
 
 // Known skill keywords for extraction from text
 const KNOWN_SKILL_KEYWORDS = [
@@ -380,6 +288,31 @@ function extractSkills(text: string): string[] {
 
   return [...found];
 }
+
+// ---------- Requirement classification ----------
+// Deterministic, rule-based (first matching rule wins). Order matters:
+// experience → education → language, everything else falls back to "skill".
+
+// Note: \b word boundaries are ASCII-only in JS regex, so Cyrillic keywords
+// must not rely on them — plain substrings are used instead.
+const EXPERIENCE_PATTERN =
+  /опыт|стаж|\d\s*\+?\s*(?:лет|год|года)|(?:^|\W)experience\b|years?\s+of\s+experience/i;
+const EDUCATION_PATTERN =
+  /образовани|высшее|среднее\s+специальн|вуз|университет|институт|академи|диплом|учебн|\bdegree\b|bachelor|master|\beducation\b/i;
+const LANGUAGE_PATTERN =
+  /английск|англ\.|\benglish\b|немецк|\bgerman\b|французск|\bfrench\b|испанск|\bspanish\b|итальянск|\bitalian\b|китайск|\bchinese\b|японск|\bjapanese\b|владени[ея][^.;]{0,30}язык/i;
+
+function classifyRequirementCategory(
+  text: string,
+): NonNullable<VacancyRequirement["category"]> {
+  const value = typeof text === "string" ? text : "";
+  if (EXPERIENCE_PATTERN.test(value)) return "experience";
+  if (EDUCATION_PATTERN.test(value)) return "education";
+  if (LANGUAGE_PATTERN.test(value)) return "language";
+  return "skill";
+}
+
+// Salary parsing is unified in lib/salary.ts (shared with vacancy validation).
 
 // ---------- Main parser ----------
 
@@ -566,6 +499,8 @@ export {
   parseVacancyImport,
   draftToVacancy,
   isValidImportUrl,
+  classifyRequirementCategory,
+  parseSalaryValue,
   extractTitle,
   extractCompany,
   extractLocation,

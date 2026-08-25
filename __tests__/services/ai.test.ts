@@ -47,6 +47,8 @@ function makeVacancy(): Vacancy {
         category: "experience",
       },
     ],
+    skills: ["TypeScript"],
+    responsibilities: ["Develop features"],
     location: "Moscow",
     source: "text",
     fetchedAt: "2026-01-01T00:00:00Z",

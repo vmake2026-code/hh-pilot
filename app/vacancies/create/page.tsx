@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { generateId } from "@/lib/ids";
 import { saveVacancy } from "@/services/vacancy-persistence";
 import { validateVacancyForm, type VacancyErrors } from "@/lib/vacancy-validation";
+import { parseSalaryValue } from "@/lib/salary";
 import { sanitizeText } from "@/lib/security";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
 import type { WorkFormat, EmploymentType } from "@/types/candidate";
@@ -64,8 +65,8 @@ export default function VacancyCreatePage() {
       location: sanitizeText(location),
       workFormat: workFormat as WorkFormat | undefined,
       employmentType: employmentType as EmploymentType | undefined,
-      salaryFrom: salaryFrom ? parseFloat(salaryFrom) : undefined,
-      salaryTo: salaryTo ? parseFloat(salaryTo) : undefined,
+      salaryFrom: parseSalaryValue(salaryFrom),
+      salaryTo: parseSalaryValue(salaryTo),
       currency: currency || undefined,
       salary: salaryFrom
         ? `от ${salaryFrom} ${currency}${salaryTo ? ` до ${salaryTo}` : ""}`
