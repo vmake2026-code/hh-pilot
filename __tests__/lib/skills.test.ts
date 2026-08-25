@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeSkill, SKILL_ALIASES } from "../../lib/skills";
+import { normalizeSkill, dedupeSkills, SKILL_ALIASES } from "../../lib/skills";
 import { normalizeSkill as matchingNormalize } from "../../services/matching";
 import { normalizeSkill as importNormalize } from "../../services/vacancy-import";
 
@@ -110,5 +110,28 @@ describe("single source of normalization across services", () => {
     expect(SKILL_ALIASES["github"]).toBe("git");
     expect(SKILL_ALIASES["ms excel"]).toBe("excel");
     expect(SKILL_ALIASES["google sheets"]).toBe("google_sheets");
+  });
+});
+
+// ---------- dedupeSkills (P6: duplicate-skill invariant) ----------
+
+describe("lib/skills dedupeSkills", () => {
+  it("removes exact duplicates, keeps first occurrence order", () => {
+    expect(dedupeSkills(["React", "React"])).toEqual(["React"]);
+    expect(dedupeSkills(["React", "Vue", "React"])).toEqual(["React", "Vue"]);
+  });
+
+  it("is normalization-aware: React / react.js / ReactJS collapse to first display value", () => {
+    expect(dedupeSkills(["React", "react.js", "ReactJS"])).toEqual(["React"]);
+    expect(dedupeSkills(["Node.js", "node"])).toEqual(["Node.js"]);
+  });
+
+  it("drops empty entries", () => {
+    expect(dedupeSkills(["React", "", "   ", "Vue"])).toEqual(["React", "Vue"]);
+    expect(dedupeSkills([])).toEqual([]);
+  });
+
+  it("keeps unique lists unchanged", () => {
+    expect(dedupeSkills(["React", "TypeScript", "Vue"])).toEqual(["React", "TypeScript", "Vue"]);
   });
 });

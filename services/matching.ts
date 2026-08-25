@@ -1,4 +1,4 @@
-import type { ResumeVersion, Skill } from "../types/resume";
+import type { ResumeVersion, Skill, Education } from "../types/resume";
 import type { Vacancy } from "../types/vacancy";
 import type { MatchResult, MatchedRequirement } from "../types/match";
 import { scoreToLevel } from "../types/match";
@@ -51,11 +51,15 @@ function matchRequirements(
   resumePositions: string[],
   resumeDescriptions: string[],
   resumeLanguages: string[] = [],
+  resumeEducation: Education[] = [],
 ): { matched: MatchedRequirement[]; missing: MatchedRequirement[] } {
   const resumeSkillSet = new Set(resumeSkills.map(normalizeSkill));
   const allResumeText = [...resumePositions, ...resumeDescriptions]
     .join(" ")
     .toLowerCase();
+  const educationText = resumeEducation.map((e) =>
+    `${e.institution} ${e.degree} ${e.field}`.toLowerCase(),
+  );
 
   const matched: MatchedRequirement[] = [];
   const missing: MatchedRequirement[] = [];
@@ -76,14 +80,17 @@ function matchRequirements(
     // Every non-skill category goes through the same word-overlap rule
     // (same normalization, same >3-char word filter, same >=50% threshold).
     // Language requirements additionally match against the resume's own
-    // language list; all other categories use the existing haystack only.
+    // language list; education requirements against the Education[] fields.
+    // All other categories use the existing haystack only.
     if (!isMatch && req.category !== "skill") {
-      const haystack =
-        req.category === "language"
-          ? [...resumeLanguages.map((l) => l.toLowerCase()), allResumeText]
-              .filter(Boolean)
-              .join(" ")
-          : allResumeText;
+      let haystack = allResumeText;
+      if (req.category === "language") {
+        haystack = [...resumeLanguages.map((l) => l.toLowerCase()), allResumeText]
+          .filter(Boolean)
+          .join(" ");
+      } else if (req.category === "education") {
+        haystack = [allResumeText, ...educationText].filter(Boolean).join(" ");
+      }
       if (haystack.length > 0) {
         const reqWords = reqText.split(/\s+/).filter((w) => w.length > 3);
         const matches = reqWords.filter((w) => haystack.includes(w));
@@ -257,6 +264,7 @@ function calculateMatch(
     resumePositions,
     resumeDescriptions,
     vd.languages,
+    vd.education,
   );
   // Edge case: empty vacancy requirements → neutral
   const reqsScore = vacancy.requirements.length > 0

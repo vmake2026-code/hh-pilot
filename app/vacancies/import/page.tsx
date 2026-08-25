@@ -13,6 +13,7 @@ import {
 } from "@/services/vacancy-import";
 import { validateVacancyForm, type VacancyErrors } from "@/lib/vacancy-validation";
 import { sanitizeText } from "@/lib/security";
+import { dedupeSkills } from "@/lib/skills";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
 import type { WorkFormat, EmploymentType } from "@/types/candidate";
 import type { VacancyImportDraft } from "@/types/vacancy";
@@ -89,7 +90,7 @@ export default function VacancyImportPage() {
   const handleSave = useCallback(() => {
     if (!draft) return;
 
-    const skillList = skillsText.split(",").map((s) => s.trim()).filter(Boolean);
+    const skillList = dedupeSkills(skillsText.split(",").map((s) => s.trim()).filter(Boolean));
     const reqList = requirementsText.split("\n").map((s) => s.trim()).filter(Boolean);
     const respList = responsibilitiesText.split("\n").map((s) => s.trim()).filter(Boolean);
 

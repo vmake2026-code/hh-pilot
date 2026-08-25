@@ -6,6 +6,7 @@ import { generateId } from "@/lib/ids";
 import { saveVacancy } from "@/services/vacancy-persistence";
 import { validateVacancyForm, type VacancyErrors } from "@/lib/vacancy-validation";
 import { parseSalaryValue } from "@/lib/salary";
+import { dedupeSkills } from "@/lib/skills";
 import { sanitizeText } from "@/lib/security";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
 import type { WorkFormat, EmploymentType } from "@/types/candidate";
@@ -38,7 +39,7 @@ export default function VacancyCreatePage() {
   const [errors, setErrors] = useState<VacancyErrors>({});
 
   const handleSave = useCallback(() => {
-    const skillList = skillsText.split(",").map((s) => s.trim()).filter(Boolean);
+    const skillList = dedupeSkills(skillsText.split(",").map((s) => s.trim()).filter(Boolean));
     const reqList = requirementsText.split("\n").map((s) => s.trim()).filter(Boolean);
     const respList = responsibilitiesText.split("\n").map((s) => s.trim()).filter(Boolean);
 

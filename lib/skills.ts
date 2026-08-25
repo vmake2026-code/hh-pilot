@@ -57,4 +57,20 @@ function normalizeSkill(raw: string): string {
   return SKILL_ALIASES[s] ?? s;
 }
 
-export { normalizeSkill, SKILL_ALIASES };
+/**
+ * Remove skills that normalize to an already-seen canonical name,
+ * keeping the first occurrence's original display value.
+ */
+function dedupeSkills(names: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of names) {
+    const key = normalizeSkill(raw);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(raw);
+  }
+  return result;
+}
+
+export { normalizeSkill, dedupeSkills, SKILL_ALIASES };

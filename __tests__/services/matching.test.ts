@@ -407,3 +407,95 @@ describe("calculateMatch score", () => {
     expect(rMatch.overallScore - r.overallScore).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ---------- Education requirements haystack (P6 fix) ----------
+
+describe("matchRequirements education category", () => {
+  const eduReq = [{ id: "e1", text: "Высшее образование", isRequired: true, category: "education" as const }];
+
+  function makeEdu(overrides: Partial<{ institution: string; degree: string; field: string }> = {}) {
+    return {
+      id: "edu-1",
+      institution: "МГСУ",
+      degree: "Высшее",
+      field: "Строительство",
+      startDate: "2016-09",
+      endDate: "2020-06",
+      description: "",
+      ...overrides,
+    };
+  }
+
+  it("matches education requirement against resume Education[]", () => {
+    const r = matchRequirements(
+      eduReq,
+      [], [], [],
+      [],
+      [makeEdu()],
+    );
+    expect(r.matched.length).toBe(1);
+    expect(r.missing.length).toBe(0);
+  });
+
+  it("matches when only the field of study is relevant", () => {
+    const r = matchRequirements(
+      [{ id: "e1", text: "Профильное строительство", isRequired: true, category: "education" as const }],
+      [], [], [],
+      [],
+      [makeEdu({ degree: "" })],
+    );
+    expect(r.matched.length).toBe(1);
+  });
+
+  it("does not produce a false match without education data", () => {
+    const r = matchRequirements(eduReq, [], [], [], [], []);
+    expect(r.matched.length).toBe(0);
+    expect(r.missing.length).toBe(1);
+  });
+
+  it("keeps education text out of non-education categories", () => {
+    const r = matchRequirements(
+      [{ id: "s1", text: "Строительство объектов", isRequired: true }],
+      [], [], [],
+      [],
+      [makeEdu()],
+    );
+    expect(r.matched.length).toBe(0);
+    expect(r.missing.length).toBe(1);
+  });
+});
+
+describe("calculateMatch education requirement integration", () => {
+  const vacWithEduReq = (): Vacancy => ({
+    id: "v1",
+    title: "Инженер",
+    company: "Test",
+    description: "Разработка",
+    requirements: [
+      { id: "edu", text: "Высшее образование", isRequired: true, category: "education" },
+    ],
+    skills: [],
+    responsibilities: [],
+    location: "Москва",
+    source: "text",
+    fetchedAt: "2026-01-01T00:00:00Z",
+  });
+
+  it("scores higher when resume has matching education", () => {
+    const base = makeVersion({ workExperience: [] });
+    const withEdu = makeVersion({
+      workExperience: [],
+      education: [
+        { id: "edu-1", institution: "МГСУ", degree: "Высшее", field: "Строительство", startDate: "2016-09", endDate: "2020-06", description: "" },
+      ],
+    });
+    const vac = vacWithEduReq();
+
+    const rWith = calculateMatch(vac, withEdu, "res1");
+    const rWithout = calculateMatch(vac, base, "res1");
+
+    expect(rWith.matchedRequirements.length).toBe(1);
+    expect(rWithout.missingRequirements.length).toBe(1);
+    expect(rWith.overallScore).toBeGreaterThan(rWithout.overallScore);
+  });
+});
