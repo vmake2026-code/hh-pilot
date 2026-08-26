@@ -1,6 +1,6 @@
 ﻿import { describe, it, expect } from "vitest";
 import { finalizeResume, createNewVersion } from "../../features/resume-wizard";
-import type { ResumeRecord } from "../../types/resume";
+import type { ResumeAnalysisInput, ResumeRecord } from "../../types/resume";
 import type { Vacancy } from "../../types/vacancy";
 import { calculateMatch } from "../../services/matching";
 import {
@@ -8,8 +8,12 @@ import {
   isAnalysisStale,
   selectLatestAnalysis,
   listAnalysesForResume,
+  RemoteAIGateway,
 } from "../../features/resume-analysis";
 import type { AIGateway } from "../../services/ai";
+import { confirmField, missingField } from "../../types/confirmation";
+
+const NOW = "2026-01-01T00:00:00Z";
 
 function makeVacancy(): Vacancy {
   return {
@@ -250,5 +254,61 @@ describe("privacy lock (P10.1.2)", () => {
 
     // Immutability источника
     expect(after).toBe(before);
+  });
+});
+
+// ---------- P10.2: RemoteAIGateway (client transport) ----------
+
+describe("RemoteAIGateway (P10.2)", () => {
+  it("POSTs payload+versionId to /api/ai/analyze and returns analysis", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const analysis = {
+      id: "an-x", resumeId: "res-1", versionId: "v-1", provider: "mock",
+      overallScore: 66, sections: [], summary: "ok", strengths: ["a"],
+      weaknesses: [], recommendations: [], createdAt: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init: init ?? {} });
+      return new Response(JSON.stringify({ ok: true, analysis }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+
+    try {
+      const gw = new RemoteAIGateway();
+      const input: ResumeAnalysisInput = {
+        id: "r", candidateId: "c", title: "T",
+        desiredPosition: confirmField("Dev"), summary: missingField(),
+        location: missingField(), workExperience: [], education: [],
+        skills: [{ name: "React", level: "beginner" }], languages: [],
+        workFormat: "", employmentType: "",
+        currentVersionId: "v-1", createdAt: NOW, updatedAt: NOW,
+      };
+      const result = await gw.analyzeResume(input, { versionId: "v-1" });
+
+      expect(result).toEqual(analysis);
+      expect(calls.length).toBe(1);
+      expect(calls[0].url).toBe("/api/ai/analyze");
+      expect(calls[0].init.method).toBe("POST");
+      const body = JSON.parse(String(calls[0].init.body));
+      expect(body.versionId).toBe("v-1");
+      expect(Object.prototype.hasOwnProperty.call(body.input, "salaryExpectation")).toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("server error -> controlled Error with message", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ ok: false, error: "AI провайдер вернул HTTP 429" }),
+      { status: 502 },
+    )) as unknown as typeof fetch;
+    try {
+      const gw = new RemoteAIGateway();
+      await expect(gw.analyzeResume({} as ResumeAnalysisInput)).rejects.toThrow("HTTP 429");
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

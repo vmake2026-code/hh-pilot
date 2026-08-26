@@ -4,7 +4,7 @@ import { use, useState, useCallback } from "react";
 import Link from "next/link";
 import { getResumeRecord } from "@/services/resume-persistence";
 import { useClientData } from "@/features/use-client-data";
-import { listAnalysesForResume, isAnalysisStale, selectLatestAnalysis, analyzeCurrentVersion } from "@/features/resume-analysis";
+import { listAnalysesForResume, isAnalysisStale, selectLatestAnalysis, analyzeCurrentVersion, RemoteAIGateway } from "@/features/resume-analysis";
 import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
 import { educationLevelLabel, skillLevelLabel } from "@/types/resume";
@@ -46,7 +46,8 @@ export default function ResumePreviewPage({
     if (!record || analyzing) return;
     setAnalyzing(true);
     setAnalysisError("");
-    const outcome = await analyzeCurrentVersion(record);
+    // P10.2: транспорт через server API route — ключ остаётся на сервере.
+    const outcome = await analyzeCurrentVersion(record, new RemoteAIGateway());
     setAnalyzing(false);
     if (!outcome.ok) {
       setAnalysisError(outcome.error);

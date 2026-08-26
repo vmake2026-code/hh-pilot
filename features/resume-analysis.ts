@@ -3,6 +3,9 @@ import type { ResumeAnalysis } from "../types/analysis";
 import { missingField } from "../types/confirmation";
 import { createAIGateway, normalizeAnalysis } from "../services/ai";
 import type { AIGateway } from "../services/ai";
+import type { Vacancy } from "../types/vacancy";
+import type { MatchResult, OptimizationSuggestion } from "../types/match";
+import type { CoverLetter } from "../types/cover-letter";
 import {
   saveAnalysis,
   listAnalysesForResume,
@@ -60,6 +63,61 @@ function selectCurrentVersion(record: ResumeRecord) {
 
 export function isAnalysisStale(analysis: ResumeAnalysis, record: ResumeRecord): boolean {
   return analysis.versionId !== record.resume.currentVersionId;
+}
+
+/**
+ * P10.2: client-side transport gateway. Ходит через server API route,
+ * поэтому API key остаётся на сервере. Контракт AIGateway сохранён.
+ */
+export class RemoteAIGateway implements AIGateway {
+  readonly name = "remote";
+
+  setProvider() {
+    // transport gateway — provider живёт на сервере
+  }
+  getProvider() {
+    return { name: this.name, async complete() { return { content: "" }; } };
+  }
+
+  async analyzeResume(
+    resume: ResumeAnalysisInput,
+    context?: { versionId?: string },
+  ): Promise<ResumeAnalysis> {
+    const response = await fetch("/api/ai/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: resume, versionId: context?.versionId ?? "" }),
+    });
+    const payload = (await response.json()) as
+      | { ok: true; analysis: ResumeAnalysis }
+      | { ok: false; error: string };
+
+    if (!response.ok || !payload.ok) {
+      throw new Error(("error" in payload && payload.error) || "AI-сервис недоступен");
+    }
+    return payload.analysis;
+  }
+
+  async matchResumeToVacancy(
+    _resume: Resume,
+    _vacancy: Vacancy,
+  ): Promise<MatchResult> {
+    throw new Error("Не используется в P10.2");
+  }
+
+  async generateCoverLetter(
+    _resume: Resume,
+    _vacancy: Vacancy,
+  ): Promise<CoverLetter> {
+    throw new Error("Не используется в P10.2");
+  }
+
+  async optimizeResume(
+    _resume: Resume,
+    _vacancy: Vacancy,
+  ): Promise<OptimizationSuggestion[]> {
+    throw new Error("Не используется в P10.2");
+  }
 }
 
 export function selectLatestAnalysis(

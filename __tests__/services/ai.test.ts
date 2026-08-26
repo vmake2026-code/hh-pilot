@@ -4,10 +4,11 @@ import {
   MockProvider,
   createAIGateway,
   normalizeAnalysis,
+  extractJson,
 } from "../../services/ai";
-import type { Resume } from "../../types/resume";
+import type { Resume, ResumeAnalysisInput } from "../../types/resume";
 import type { Vacancy } from "../../types/vacancy";
-import { confirmField } from "../../types/confirmation";
+import { confirmField, missingField } from "../../types/confirmation";
 
 function makeResume(): Resume {
   return {
@@ -191,5 +192,93 @@ describe("normalizeAnalysis (P10.1)", () => {
     expect(resume.skills[0].level).toBe("advanced");
     expect(resume.workExperience[0].achievements).toEqual(["A1"]);
     expect(resume.education[0].level).toBe("higher");
+  });
+});
+
+// ---------- P10.2: provider path / extractJson ----------
+
+describe("extractJson (P10.2)", () => {
+  it("parses plain JSON", () => {
+    expect(extractJson('{"a":1}')).toEqual({ a: 1 });
+  });
+  it("parses fenced ```json blocks", () => {
+    expect(extractJson('Вот анализ:\n```json\n{"a":2}\n```\nготово')).toEqual({ a: 2 });
+  });
+  it("parses JSON inside surrounding text", () => {
+    expect(extractJson('Ответ: {"a":3} конец')).toEqual({ a: 3 });
+  });
+  it("returns null for empty/garbage", () => {
+    expect(extractJson("")).toBeNull();
+    expect(extractJson("   ")).toBeNull();
+    expect(extractJson("никакого json")).toBeNull();
+    expect(extractJson("{broken")).toBeNull();
+  });
+});
+
+describe("AIGateway.analyzeResume provider path (P10.2)", () => {
+  const input: ResumeAnalysisInput = {
+    id: "res-1", candidateId: "c", title: "T",
+    desiredPosition: confirmField("Dev"), summary: missingField(),
+    location: missingField(),
+    workExperience: [{ id: "w", company: "A", position: "Dev", startDate: "01/2020", endDate: null, isCurrent: true, description: "D", achievements: ["A1"] }],
+    education: [{ id: "e", level: "higher", institution: "МГУ", degree: "", field: "", startDate: "", endDate: null, description: "" }],
+    skills: [{ name: "React", level: "advanced" }],
+    languages: [], workFormat: "remote", employmentType: "full_time",
+    currentVersionId: "v-9", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+  };
+
+  function jsonProvider(content: string) {
+    return {
+      name: "json-stub",
+      async complete() { return { content, usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } }; },
+    };
+  }
+
+  it("builds prompt through provider and returns normalized analysis with bindings", async () => {
+    const gateway = new MockAIGateway(jsonProvider(JSON.stringify({
+      overallScore: 70,
+      sections: [{ section: "experience", score: 70, feedback: "норм", suggestions: ["детали"] }],
+      summary: "Хорошее резюме",
+      strengths: ["React"],
+      weaknesses: [],
+      recommendations: ["Добавьте достижения"],
+    })));
+
+    const result = await gateway.analyzeResume(input, { versionId: "v-9" });
+
+    expect(result.resumeId).toBe("res-1");
+    expect(result.versionId).toBe("v-9");          // system binding, не от AI
+    expect(result.provider).toBe("json-stub");     // из provider.name
+    expect(result.id).toBeTruthy();                // системный id
+    expect(result.createdAt).toBeTruthy();
+    expect(result.overallScore).toBe(70);
+    expect(result.recommendations).toEqual(["Добавьте достижения"]);
+  });
+
+  it("garbage content -> controlled error (no JSON found)", async () => {
+    const gateway = new MockAIGateway(jsonProvider("никакого json здесь нет"));
+    await expect(gateway.analyzeResume(input, { versionId: "v-9" })).rejects.toThrow("пустой или некорректный");
+  });
+
+  it("valid JSON with schema violations -> controlled error", async () => {
+    const gateway = new MockAIGateway(jsonProvider(JSON.stringify({
+      overallScore: "70", // строка вместо числа
+      sections: "not-array",
+      summary: 5,
+    })));
+    await expect(gateway.analyzeResume(input, { versionId: "v-9" })).rejects.toThrow("не соответствующий схеме");
+  });
+
+  it("empty content -> controlled error", async () => {
+    const gateway = new MockAIGateway(jsonProvider(""));
+    await expect(gateway.analyzeResume(input, { versionId: "v-9" })).rejects.toThrow("пустой");
+  });
+
+  it("throwing provider propagates controlled error to orchestration", async () => {
+    const gateway = new MockAIGateway({
+      name: "down",
+      async complete() { throw new Error("HTTP 429"); },
+    });
+    await expect(gateway.analyzeResume(input, { versionId: "v-9" })).rejects.toThrow("HTTP 429");
   });
 });
