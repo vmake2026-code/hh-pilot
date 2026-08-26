@@ -649,7 +649,10 @@ describe("calculateMatch MM/YYYY experience integration (P7.3 lock)", () => {
 // ---------- P9.1: education level in education haystack ----------
 
 describe("matchRequirements education level (P9.1)", () => {
-  const edu = (level: "higher" | "secondary_special" | "secondary" | undefined, over: Partial<{ institution: string; degree: string; field: string }> = {}) => ({
+  const edu = (
+    level: "secondary" | "secondary_special" | "unfinished_higher" | "higher" | "bachelor" | "master" | "candidate" | "doctor" | undefined,
+    over: Partial<{ institution: string; degree: string; field: string }> = {},
+  ) => ({
     id: "e1",
     level,
     institution: "",
@@ -714,5 +717,34 @@ describe("calculateMatch skill level invariance (P9.2)", () => {
     expect(rA.level).toBe(rB.level);
     expect(rA.risks).toEqual(rB.risks);
     expect(rA.matchedSkills).toEqual(rB.matchedSkills);
+  });
+});
+
+// ---------- P9.1.1: education level matching matrix (HH 8 levels) ----------
+
+describe("matchRequirements education level HH matrix (P9.1.1)", () => {
+  const cases: [string, "secondary" | "secondary_special" | "unfinished_higher" | "higher" | "bachelor" | "master" | "candidate" | "doctor", boolean][] = [
+    ["Высшее образование", "higher", true],
+    ["Высшее образование", "secondary", false],
+    ["Бакалавр", "bachelor", true],
+    ["Магистр", "master", true],
+    ["Кандидат наук", "candidate", true],
+    ["Доктор наук", "doctor", true],
+    ["Неоконченное высшее", "unfinished_higher", true],
+  ];
+
+  it.each(cases)("req '%s' + level '%s' -> matched=%p", (text, level, shouldMatch) => {
+    const r = matchRequirements(
+      [{ id: "r1", text, isRequired: true, category: "education" }],
+      [], [], [], [],
+      [{ id: "e1", level, institution: "", degree: "", field: "", startDate: "09/2016", endDate: null, description: "" }],
+    );
+    expect(r.matched.length).toBe(shouldMatch ? 1 : 0);
+  });
+
+  it("scope guard: bachelor label text does not leak into other categories", () => {
+    const edu = [{ id: "e1", level: "bachelor" as const, institution: "", degree: "", field: "", startDate: "", endDate: null, description: "" }];
+    expect(matchRequirements([{ id: "s1", text: "Бакалавр опыт работы", isRequired: true }], [], [], [], [], edu).matched.length).toBe(0);
+    expect(matchRequirements([{ id: "l1", text: "Бакалавр язык", isRequired: true, category: "language" }], [], [], [], [], edu).matched.length).toBe(0);
   });
 });

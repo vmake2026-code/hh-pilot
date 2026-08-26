@@ -328,3 +328,29 @@ describe("skill level finalize & edit (P9.2)", () => {
     expect(newVersion.data.skills[0].level).toBe("advanced");
   });
 });
+
+// ---------- P9.1.1: all 8 HH levels through finalize & edit ----------
+
+describe("education level finalize & edit all 8 (P9.1.1)", () => {
+  const levels = ["secondary", "secondary_special", "unfinished_higher", "higher", "bachelor", "master", "candidate", "doctor"] as const;
+
+  function dataWithAllLevels() {
+    const data = makeValidWizardData();
+    data.education = levels.map((level, i) => ({
+      id: `edu-${i}`, level, institution: `Вуз ${i}`, degree: "", field: "",
+      startDate: "09/2016", endDate: null, description: "",
+    }));
+    return data;
+  }
+
+  it("finalize keeps all 8 levels in ResumeVersion.data", () => {
+    const { version } = finalizeResume(dataWithAllLevels(), makeAllConfirmed());
+    expect(version.data.education.map((e) => e.level)).toEqual([...levels]);
+  });
+
+  it("edit restores all 8 levels into WizardData", () => {
+    const { record } = finalizeResume(dataWithAllLevels(), makeAllConfirmed());
+    const restored = resumeRecordToWizardData(record);
+    expect(restored.education.map((e) => e.level)).toEqual([...levels]);
+  });
+});

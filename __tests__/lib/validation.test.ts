@@ -159,6 +159,24 @@ describe("validateEducation", () => {
     expect(Object.keys(errors).length).toBe(0);
   });
 
+  const hhLevels = [
+    "secondary",
+    "secondary_special",
+    "unfinished_higher",
+    "higher",
+    "bachelor",
+    "master",
+    "candidate",
+    "doctor",
+  ] as const;
+
+  it.each(hhLevels)("accepts all 8 HH levels (P9.1.1): %s", (level) => {
+    const errors = validateEducation([
+      { id: "1", level, institution: "Вуз", degree: "", field: "", startDate: "09/2016", endDate: null, description: "" },
+    ]);
+    expect(errors["edu[0].level"]).toBeUndefined();
+  });
+
   it.each(["xyz", "", "13/2020"])("rejects arbitrary level %j", (level) => {
     const errors = validateEducation([
       // @ts-expect-error — проверяем рантайм-отклонение произвольных строк

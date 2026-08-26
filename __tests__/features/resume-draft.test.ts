@@ -190,3 +190,18 @@ describe("skill level draft roundtrip (P9.2)", () => {
     expect(restored?.data.skills[0].level).toBeUndefined();
   });
 });
+
+// ---------- P9.1.1: all 8 HH levels through draft ----------
+
+describe("education level draft roundtrip all 8 (P9.1.1)", () => {
+  it("preserves every canonical level after JSON envelope", () => {
+    const levels = ["secondary", "secondary_special", "unfinished_higher", "higher", "bachelor", "master", "candidate", "doctor"] as const;
+    const data = makeWizardData();
+    data.education = levels.map((level, i) => ({
+      id: `e${i}`, institution: `Вуз ${i}`, degree: "", field: "",
+      startDate: "09/2016", endDate: null, description: "", level,
+    }));
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(createDraftState(data, 4, new Set()))));
+    expect(restored?.data.education.map((e) => e.level)).toEqual([...levels]);
+  });
+});

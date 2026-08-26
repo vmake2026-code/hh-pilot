@@ -11,13 +11,26 @@ interface WorkExperience {
   achievements: string[];
 }
 
-/** Education levels used by the current HH flow. */
-type EducationLevel = "higher" | "secondary_special" | "secondary";
+/** Education levels aligned with the real HH flow (P9.1.1). */
+type EducationLevel =
+  | "secondary"
+  | "secondary_special"
+  | "unfinished_higher"
+  | "higher"
+  | "bachelor"
+  | "master"
+  | "candidate"
+  | "doctor";
 
 const EDUCATION_LEVEL_LABELS: Record<EducationLevel, string> = {
-  higher: "Высшее",
-  secondary_special: "Среднее специальное",
   secondary: "Среднее",
+  secondary_special: "Среднее специальное",
+  unfinished_higher: "Неоконченное высшее",
+  higher: "Высшее",
+  bachelor: "Бакалавр",
+  master: "Магистр",
+  candidate: "Кандидат наук",
+  doctor: "Доктор наук",
 };
 
 /** Russian display label for a level; empty string for legacy/undefined. */
