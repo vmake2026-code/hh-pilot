@@ -603,3 +603,45 @@ describe("matchRequirements skill token boundaries (P7.1)", () => {
     expect(matchRequirements(req("Знание Реакт"), ["Реакт"], [], []).matched.length).toBe(1);
   });
 });
+
+// ---------- P7.3 Regression Lock: MM/YYYY through calculateMatch ----------
+
+describe("calculateMatch MM/YYYY experience integration (P7.3 lock)", () => {
+  const vacancyWithYears = (desc: string): Vacancy =>
+    makeVacancy({ description: desc });
+
+  const exp = (start: string, end: string | null) => [
+    { id: "w1", company: "A", position: "Frontend Developer", startDate: start, endDate: end, isCurrent: end === null, description: "Разработка React приложений", achievements: [] },
+  ];
+
+  it("MM/YYYY WorkExperience flows into experienceScore: 4y vs '3 года' -> no risk, score 90", () => {
+    const r = calculateMatch(vacancyWithYears("Требуется опыт 3 года"), makeVersion({ workExperience: exp("01/2020", "01/2024") }), "res1");
+    expect(r.overallScore).toBe(90);
+    expect(r.level).toBe("strong");
+    expect(r.risks).toEqual([]);
+  });
+
+  it("same vacancy with NO experience drops to 84 + insufficient-experience risk", () => {
+    const r = calculateMatch(vacancyWithYears("Требуется опыт 3 года"), makeVersion({ workExperience: exp("", null) }), "res1");
+    expect(r.overallScore).toBe(84);
+    expect(r.risks.length).toBe(1);
+    expect(r.risks[0]).toContain("опыт не указан");
+  });
+
+  it("4y vs range '3–5 лет': requiredYears=3, no false insufficient-risk, score 90", () => {
+    expect(extractRequiredYears("Требуемый опыт работы: 3–5 лет")).toBe(3);
+    const r = calculateMatch(vacancyWithYears("Требуемый опыт работы: 3–5 лет"), makeVersion({ workExperience: exp("01/2020", "01/2024") }), "res1");
+    expect(r.overallScore).toBe(90);
+    expect(r.risks).toEqual([]);
+  });
+
+  it("insufficient: 3y vs '5 лет' -> risk present and lower score than sufficient candidate", () => {
+    const sufficient = calculateMatch(vacancyWithYears("Требуется опыт 5 лет"), makeVersion({ workExperience: exp("01/2020", "01/2025") }), "res1");
+    const insufficient = calculateMatch(vacancyWithYears("Требуется опыт 5 лет"), makeVersion({ workExperience: exp("01/2020", "01/2023") }), "res1");
+
+    expect(insufficient.overallScore).toBeLessThan(sufficient.overallScore);
+    expect(insufficient.risks.length).toBe(1);
+    expect(insufficient.risks[0]).toContain("подтверждено 3 года");
+    expect(sufficient.risks).toEqual([]);
+  });
+});
