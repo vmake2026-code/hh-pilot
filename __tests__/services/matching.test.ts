@@ -8,6 +8,7 @@ import {
   matchEmploymentType,
   calculateYearsExperience,
   calculateMatch,
+  extractRequiredYears,
 } from "../../services/matching";
 import type { Vacancy } from "../../types/vacancy";
 import type { ResumeVersion } from "../../types/resume";
@@ -497,5 +498,108 @@ describe("calculateMatch education requirement integration", () => {
     expect(rWith.matchedRequirements.length).toBe(1);
     expect(rWithout.missingRequirements.length).toBe(1);
     expect(rWith.overallScore).toBeGreaterThan(rWithout.overallScore);
+  });
+});
+
+// ---------- P7.1 regression: years experience (MM/YYYY) ----------
+
+describe("calculateYearsExperience MM/YYYY (P7.1)", () => {
+  it("canonical MM/YYYY: 01/2020 -> 01/2024 = 4y", () => {
+    expect(calculateYearsExperience([{ startDate: "01/2020", endDate: "01/2024", isCurrent: false }])).toBe(4);
+  });
+
+  it("canonical MM/YYYY: 01/2020 -> 01/2025 = 5y", () => {
+    expect(calculateYearsExperience([{ startDate: "01/2020", endDate: "01/2025", isCurrent: false }])).toBe(5);
+  });
+
+  it("short period 09/2024 -> 02/2025 ~ 0.4y (diff-months model preserved)", () => {
+    expect(calculateYearsExperience([{ startDate: "09/2024", endDate: "02/2025", isCurrent: false }])).toBe(0.4);
+  });
+
+  it("legacy YYYY-MM keeps working: 2020-01 -> 2024-01 = 4y", () => {
+    expect(calculateYearsExperience([{ startDate: "2020-01", endDate: "2024-01", isCurrent: false }])).toBe(4);
+  });
+
+  it("current job counts up to the current month/year", () => {
+    const now = new Date();
+    const startYear = now.getFullYear() - 6;
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const years = calculateYearsExperience([
+      { startDate: `${mm}/${startYear}`, endDate: null, isCurrent: true },
+    ]);
+    expect(years).toBeGreaterThan(5.5);
+    expect(years).toBeLessThan(7);
+  });
+
+  it("overlapping periods are not double-counted (union)", () => {
+    // 01/2020-01/2022 (24м) ∪ 06/2021-06/2023 (30м), перекрытие 7м:
+    // непрерывное покрытие 01/2020-06/2023 = 41 месяц ≈ 3.4
+    expect(calculateYearsExperience([
+      { startDate: "01/2020", endDate: "01/2022", isCurrent: false },
+      { startDate: "06/2021", endDate: "06/2023", isCurrent: false },
+    ])).toBe(3.4);
+  });
+
+  it("malformed start date skips the entry", () => {
+    expect(calculateYearsExperience([{ startDate: "abc", endDate: "01/2024", isCurrent: false }])).toBe(0);
+  });
+
+  it("unparseable end date with explicit endDate skips the entry", () => {
+    expect(calculateYearsExperience([{ startDate: "01/2020", endDate: "soon", isCurrent: false }])).toBe(0);
+  });
+});
+
+// ---------- P7.1 regression: required years extraction ----------
+
+describe("extractRequiredYears (P7.1)", () => {
+  it.each([
+    ["3 года", 3],
+    ["3+ года", 3],
+    ["от 3 лет", 3],
+    ["не менее 3 лет", 3],
+    ["5 years", 5],
+    ["5+ years", 5],
+    ["Требуется 3–5 лет опыта", 3],
+    ["Опыт 3-5 лет", 3],
+    ["Стаж 3 — 5 лет", 3],
+  ])("'%s' => %i", (desc, expected) => {
+    expect(extractRequiredYears(desc)).toBe(expected);
+  });
+
+  it.each(["трёх лет", "3-х лет", "без цифр вообще"])("keeps neutral for '%s'", (desc) => {
+    expect(extractRequiredYears(desc)).toBeNull();
+  });
+});
+
+// ---------- P7.1 regression: skill requirement boundaries ----------
+
+describe("matchRequirements skill token boundaries (P7.1)", () => {
+  const req = (text: string) => [{ id: "r1", text, isRequired: true, category: "skill" as const }];
+
+  it("'Reactive UI' does NOT match skill 'react' (no substring FP)", () => {
+    const r = matchRequirements(req("Reactive UI"), ["react"], [], []);
+    expect(r.matched.length).toBe(0);
+    expect(r.missing.length).toBe(1);
+  });
+
+  it("'React' matches 'react'", () => {
+    expect(matchRequirements(req("React"), ["react"], [], []).matched.length).toBe(1);
+  });
+
+  it("alias 'React.js разработка' still matches 'react' (dot is a boundary)", () => {
+    expect(matchRequirements(req("React.js разработка"), ["react"], [], []).matched.length).toBe(1);
+  });
+
+  it("alias 'Vue.js' still matches 'vue'", () => {
+    expect(matchRequirements(req("Vue.js"), ["vue"], [], []).matched.length).toBe(1);
+  });
+
+  it("existing behavior preserved: 'CI/CD' text vs normalized 'cicd' stays unmatched", () => {
+    const r = matchRequirements(req("Опыт CI/CD"), ["cicd"], [], []);
+    expect(r.matched.length).toBe(0);
+  });
+
+  it("Russian exact match still works", () => {
+    expect(matchRequirements(req("Знание Реакт"), ["Реакт"], [], []).matched.length).toBe(1);
   });
 });

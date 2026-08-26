@@ -45,6 +45,26 @@ function matchSkills(
 
 // ---------- Requirements matching ----------
 
+/**
+ * Word-boundary containment: the occurrence must not be glued to a
+ * letter/digit on either side. Punctuation like . / - + # counts as a
+ * boundary, so existing aliases (react.js, ci/cd, c#, c++) keep working,
+ * while "reactive" no longer matches "react".
+ */
+function includesSkillToken(reqText: string, skill: string): boolean {
+  if (!skill) return false;
+  const isWordChar = (ch: string | undefined) =>
+    ch !== undefined && /[a-zа-яё0-9_]/i.test(ch);
+  let idx = reqText.indexOf(skill);
+  while (idx !== -1) {
+    const before = idx > 0 ? reqText[idx - 1] : undefined;
+    const after = idx + skill.length < reqText.length ? reqText[idx + skill.length] : undefined;
+    if (!isWordChar(before) && !isWordChar(after)) return true;
+    idx = reqText.indexOf(skill, idx + 1);
+  }
+  return false;
+}
+
 function matchRequirements(
   vacancyRequirements: Vacancy["requirements"],
   resumeSkills: string[],
@@ -70,7 +90,7 @@ function matchRequirements(
 
     if (req.category === "skill") {
       for (const skill of resumeSkillSet) {
-        if (reqText.includes(skill)) {
+        if (includesSkillToken(reqText, skill)) {
           isMatch = true;
           break;
         }
@@ -122,6 +142,23 @@ function matchRequirements(
 
 // ---------- Experience matching ----------
 
+/**
+ * Extract the MINIMUM required years from a vacancy description.
+ * Ranges ("3–5 лет", "3 — 5 лет", "3-5 лет") resolve to their first number;
+ * plain forms ("3 года", "3+ года", "от 3 лет", "не менее 3 лет",
+ * "5 years", "5+ years") resolve to their single number.
+ * Word forms without digits ("трёх лет") and glued suffixes ("3-х лет")
+ * intentionally yield null (neutral score).
+ */
+function extractRequiredYears(description: string): number | null {
+  const match = description.match(
+    /(\d+)\s*(?:[-–—]\s*\d+\s*)?\+?\s*(?:лет|год|года|years)/i,
+  );
+  if (!match) return null;
+  const years = parseInt(match[1], 10);
+  return Number.isFinite(years) ? years : null;
+}
+
 function matchExperience(
   vacancyTitle: string,
   vacancyDesc: string,
@@ -143,9 +180,8 @@ function matchExperience(
   let experienceRisk: string | undefined;
   let yearsScore = 1;
 
-  const yearsMatch = vacancyDesc.match(/(\d+)\+?\s*(?:лет|год|года|years)/i);
-  if (yearsMatch) {
-    const requiredYears = parseInt(yearsMatch[1], 10);
+  const requiredYears = extractRequiredYears(vacancyDesc);
+  if (requiredYears !== null) {
     if (totalYears > 0 && totalYears < requiredYears) {
       yearsScore = totalYears / requiredYears;
       experienceRisk = `В вакансии требуется ${requiredYears}+ лет опыта, подтверждено ${totalYears} года.`;
@@ -215,20 +251,65 @@ function matchEmploymentType(
 
 // ---------- Work experience duration ----------
 
+interface MonthPoint {
+  year: number;
+  month: number;
+}
+
+/** Parse canonical MM/YYYY and legacy YYYY-MM into numeric parts (no Date parsing). */
+function parseMonthYear(value: string): MonthPoint | null {
+  const mmYyyy = /^(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (mmYyyy) {
+    const month = parseInt(mmYyyy[1], 10);
+    const year = parseInt(mmYyyy[2], 10);
+    return month >= 1 && month <= 12 ? { year, month } : null;
+  }
+  const yyyyMm = /^(\d{4})-(\d{2})$/.exec(value.trim());
+  if (yyyyMm) {
+    const year = parseInt(yyyyMm[1], 10);
+    const month = parseInt(yyyyMm[2], 10);
+    return month >= 1 && month <= 12 ? { year, month } : null;
+  }
+  return null;
+}
+
+function monthIndexOf(point: MonthPoint): number {
+  return point.year * 12 + (point.month - 1);
+}
+
 function calculateYearsExperience(
   positions: { startDate: string; endDate: string | null; isCurrent: boolean }[],
 ): number {
-  let totalMonths = 0;
   const now = new Date();
+  const nowPoint: MonthPoint = { year: now.getFullYear(), month: now.getMonth() + 1 };
 
+  const intervals: [number, number][] = [];
   for (const pos of positions) {
-    if (!pos.startDate) continue;
-    const start = new Date(pos.startDate);
-    if (isNaN(start.getTime())) continue;
-    const end = pos.isCurrent ? now : pos.endDate ? new Date(pos.endDate) : now;
-    if (isNaN(end.getTime())) continue;
-    const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-    if (months > 0) totalMonths += months;
+    const start = parseMonthYear(pos.startDate);
+    if (!start) continue;
+    let end: MonthPoint | null;
+    if (pos.isCurrent || !pos.endDate) {
+      end = nowPoint;
+    } else {
+      end = parseMonthYear(pos.endDate);
+      if (!end) continue;
+    }
+    const startIdx = monthIndexOf(start);
+    const endIdx = monthIndexOf(end);
+    if (endIdx <= startIdx) continue;
+    intervals.push([startIdx, endIdx]);
+  }
+
+  // Union of intervals: overlapping periods are not double-counted.
+  intervals.sort((a, b) => a[0] - b[0]);
+  let totalMonths = 0;
+  let cursor = -Infinity;
+  for (const [start, end] of intervals) {
+    const from = Math.max(start, cursor);
+    if (end > from) {
+      totalMonths += end - from;
+      cursor = end;
+    }
   }
 
   return Math.round((totalMonths / 12) * 10) / 10;
@@ -364,5 +445,6 @@ export {
   matchEmploymentType,
   calculateYearsExperience,
   calculateMatch,
+  extractRequiredYears,
   SKILL_ALIASES,
 };
