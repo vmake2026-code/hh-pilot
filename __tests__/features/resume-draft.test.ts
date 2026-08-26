@@ -127,3 +127,17 @@ describe("clearing one draft context does not affect another", () => {
     expect(kept?.step).toBe(3);
   });
 });
+
+describe("draft independence from confirmations (P6.3)", () => {
+  it("keeps firstName/lastName/city in draft regardless of confirmedFields", () => {
+    const data = makeWizardData({ firstName: "Пётр", lastName: "Петров", city: "Сочи" });
+    // Подтверждён только телефон — ФИО/город не в наборе.
+    const state = createDraftState(data, 2, new Set(["phone"]));
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(state)));
+
+    expect(restored?.data.firstName).toBe("Пётр");
+    expect(restored?.data.lastName).toBe("Петров");
+    expect(restored?.data.city).toBe("Сочи");
+    expect(restored?.confirmedFields).toEqual(["phone"]);
+  });
+});

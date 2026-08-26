@@ -73,72 +73,93 @@ describe("validateWizardStep", () => {
 });
 
 describe("buildFactChecks", () => {
-  it("builds checks for all required fields", () => {
+  it("builds checks only for confirmation-gated fields", () => {
     const data = createDefaultWizardData();
     const checks = buildFactChecks(data, new Set());
-    expect(checks.length).toBe(6); // firstName, lastName, city, phone, email, desiredPosition
+    expect(checks.length).toBe(3); // phone, email, desiredPosition
+    expect(checks.map((c) => c.fieldPath)).toEqual([
+      "phone",
+      "email",
+      "desiredPosition",
+    ]);
     checks.forEach((c) => {
       expect(c.isRequired).toBe(true);
     });
   });
 
+  it("excludes name and city from fact-check", () => {
+    const checks = buildFactChecks(createDefaultWizardData(), new Set());
+    const paths = checks.map((c) => c.fieldPath);
+    expect(paths).not.toContain("firstName");
+    expect(paths).not.toContain("lastName");
+    expect(paths).not.toContain("city");
+  });
+
   it("shows confirmed when field is in confirmed set", () => {
-    const data = { ...createDefaultWizardData(), firstName: "Иван" };
-    const checks = buildFactChecks(data, new Set(["firstName"]));
-    const fn = checks.find((c) => c.fieldPath === "firstName");
-    expect(fn?.level).toBe("confirmed");
+    const data = { ...createDefaultWizardData(), phone: "+79001234567" };
+    const checks = buildFactChecks(data, new Set(["phone"]));
+    const phone = checks.find((c) => c.fieldPath === "phone");
+    expect(phone?.level).toBe("confirmed");
   });
 
   it("shows missing for empty fields", () => {
     const data = createDefaultWizardData();
     const checks = buildFactChecks(data, new Set());
-    const fn = checks.find((c) => c.fieldPath === "firstName");
-    expect(fn?.level).toBe("missing");
+    const phone = checks.find((c) => c.fieldPath === "phone");
+    expect(phone?.level).toBe("missing");
   });
 });
 
 describe("canFinalize", () => {
+  function filledData() {
+    return {
+      ...createDefaultWizardData(),
+      firstName: "Иван",
+      lastName: "Иванов",
+      city: "Москва",
+      phone: "+79001234567",
+      email: "ivan@test.com",
+      desiredPosition: "Dev",
+    };
+  }
+  const contactConfirmed = new Set(["phone", "email", "desiredPosition"]);
+
   it("blocks when required fields are missing", () => {
-    const data = createDefaultWizardData();
-    const result = canFinalize(data, new Set());
+    const result = canFinalize(createDefaultWizardData(), new Set());
     expect(result.allowed).toBe(false);
     expect(result.blockingFields.length).toBeGreaterThan(0);
   });
 
+  it("allows when only phone/email/desiredPosition are confirmed (P6.3)", () => {
+    // firstName/lastName/city заполнены, но НЕ подтверждены — не блокируют.
+    const result = canFinalize(filledData(), contactConfirmed);
+    expect(result.allowed).toBe(true);
+    expect(result.blockingFields.length).toBe(0);
+  });
+
   it("blocks when filled but not confirmed", () => {
-    const data = {
-      ...createDefaultWizardData(),
-      firstName: "Иван",
-      lastName: "Иванов",
-      city: "Москва",
-      phone: "+79001234567",
-      email: "ivan@test.com",
-      desiredPosition: "Dev",
-    };
-    const result = canFinalize(data, new Set());
+    const result = canFinalize(filledData(), new Set());
     expect(result.allowed).toBe(false);
   });
 
-  it("allows when all required fields are filled and confirmed", () => {
-    const data = {
-      ...createDefaultWizardData(),
-      firstName: "Иван",
-      lastName: "Иванов",
-      city: "Москва",
-      phone: "+79001234567",
-      email: "ivan@test.com",
-      desiredPosition: "Dev",
-    };
-    const confirmed = new Set([
-      "firstName",
-      "lastName",
-      "city",
-      "phone",
-      "email",
-      "desiredPosition",
-    ]);
-    const result = canFinalize(data, confirmed);
-    expect(result.allowed).toBe(true);
-    expect(result.blockingFields.length).toBe(0);
+  it("blocks when phone is not confirmed", () => {
+    const confirmed = new Set(["email", "desiredPosition"]);
+    const result = canFinalize(filledData(), confirmed);
+    expect(result.allowed).toBe(false);
+    expect(result.blockingFields).toContain("Телефон");
+  });
+
+  it("blocks when email is not confirmed", () => {
+    const confirmed = new Set(["phone", "desiredPosition"]);
+    const result = canFinalize(filledData(), confirmed);
+    expect(result.allowed).toBe(false);
+    expect(result.blockingFields).toContain("Email");
+  });
+
+  it("blocks when desiredPosition is not confirmed", () => {
+    const confirmed = new Set(["phone", "email"]);
+    const result = canFinalize(filledData(), confirmed);
+    expect(result.allowed).toBe(false);
+    expect(result.blockingFields).toContain("Желаемая должность");
   });
 });

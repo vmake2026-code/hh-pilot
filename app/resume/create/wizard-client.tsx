@@ -323,14 +323,6 @@ export default function WizardClient() {
           required
           placeholder="Иван"
           onChange={(v) => updateField("firstName", v)}
-          onConfirm={() => confirmField("firstName")}
-          confirmationLevel={
-            confirmedFields.has("firstName")
-              ? "confirmed"
-              : data.firstName.trim()
-                ? "inferred"
-                : "missing"
-          }
         />
         <FormField
           label="Фамилия"
@@ -340,14 +332,6 @@ export default function WizardClient() {
           required
           placeholder="Иванов"
           onChange={(v) => updateField("lastName", v)}
-          onConfirm={() => confirmField("lastName")}
-          confirmationLevel={
-            confirmedFields.has("lastName")
-              ? "confirmed"
-              : data.lastName.trim()
-                ? "inferred"
-                : "missing"
-          }
         />
         <FormField
           label="Отчество"
@@ -364,14 +348,6 @@ export default function WizardClient() {
           required
           placeholder="Москва"
           onChange={(v) => updateField("city", v)}
-          onConfirm={() => confirmField("city")}
-          confirmationLevel={
-            confirmedFields.has("city")
-              ? "confirmed"
-              : data.city.trim()
-                ? "inferred"
-                : "missing"
-          }
         />
         <FormField
           label="Телефон"

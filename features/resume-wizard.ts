@@ -42,9 +42,6 @@ type WizardStep = (typeof WIZARD_STEPS)[number]["number"];
 // ---------- Required fields for fact-check ----------
 
 const REQUIRED_FIELDS: { path: string; label: string }[] = [
-  { path: "firstName", label: "Имя" },
-  { path: "lastName", label: "Фамилия" },
-  { path: "city", label: "Город" },
   { path: "phone", label: "Телефон" },
   { path: "email", label: "Email" },
   { path: "desiredPosition", label: "Желаемая должность" },
