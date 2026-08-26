@@ -292,3 +292,39 @@ describe("canFinalize", () => {
     expect(result.blockingFields.length).toBe(0);
   });
 });
+
+// ---------- P9.2 Skill levels through finalize/edit ----------
+
+describe("skill level finalize & edit (P9.2)", () => {
+  it("finalize keeps skill levels in ResumeVersion.data", () => {
+    const data = makeValidWizardData();
+    data.skills = [
+      { name: "React", level: "advanced" },
+      { name: "TypeScript", level: "beginner" },
+    ];
+    const { version } = finalizeResume(data, makeAllConfirmed());
+    expect(version.data.skills[0]).toEqual({ name: "React", level: "advanced" });
+    expect(version.data.skills[1].level).toBe("beginner");
+  });
+
+  it("edit restores levels back into WizardData and re-save preserves them", () => {
+    const data = makeValidWizardData();
+    data.skills = [
+      { name: "React", level: "advanced" },
+      { name: "Vue", level: "intermediate" },
+      { name: "SQL" }, // legacy entry without level
+    ];
+    const { record } = finalizeResume(data, makeAllConfirmed());
+
+    const restored = resumeRecordToWizardData(record);
+    expect(restored.skills[0].level).toBe("advanced");
+    expect(restored.skills[1].level).toBe("intermediate");
+    expect(restored.skills[2].level).toBeUndefined();
+
+    // пользователь выбирает уровень легаси-навыку и пересохраняет
+    restored.skills[2].level = "beginner";
+    const newVersion = createNewVersion(restored, record, makeAllConfirmed());
+    expect(newVersion.data.skills[2].level).toBe("beginner");
+    expect(newVersion.data.skills[0].level).toBe("advanced");
+  });
+});

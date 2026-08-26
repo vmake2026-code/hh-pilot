@@ -698,3 +698,21 @@ describe("matchRequirements education level (P9.1)", () => {
     expect(matchRequirements(langReq, [], [], [], [], withLevelOnly).matched.length).toBe(0);
   });
 });
+
+// ---------- P9.2 regression lock: Skill.level must NOT affect matching ----------
+
+describe("calculateMatch skill level invariance (P9.2)", () => {
+  it("beginner vs advanced levels produce identical score/level/risks", () => {
+    const v = makeVacancy();
+    const beginner = makeVersion({ skills: [{ name: "React", level: "beginner" }, { name: "TypeScript", level: "beginner" }] });
+    const advanced = makeVersion({ skills: [{ name: "React", level: "advanced" }, { name: "TypeScript", level: "advanced" }] });
+
+    const rB = calculateMatch(v, beginner, "res1");
+    const rA = calculateMatch(v, advanced, "res1");
+
+    expect(rA.overallScore).toBe(rB.overallScore);
+    expect(rA.level).toBe(rB.level);
+    expect(rA.risks).toEqual(rB.risks);
+    expect(rA.matchedSkills).toEqual(rB.matchedSkills);
+  });
+});

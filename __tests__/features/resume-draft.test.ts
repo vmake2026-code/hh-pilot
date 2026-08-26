@@ -167,3 +167,26 @@ describe("education level draft roundtrip (P9.1)", () => {
     expect(restored?.data.education[0].level).toBeUndefined();
   });
 });
+
+// ---------- P9.2 Skill levels: draft & finalize lifecycle ----------
+
+describe("skill level draft roundtrip (P9.2)", () => {
+  it("different levels survive JSON envelope", () => {
+    const data = makeWizardData();
+    data.skills = [
+      { name: "React", level: "advanced" },
+      { name: "Vue", level: "beginner" },
+      { name: "TypeScript", level: "intermediate" },
+    ];
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(createDraftState(data, 5, new Set()))));
+    expect(restored?.data.skills.map((s) => s.level)).toEqual(["advanced", "beginner", "intermediate"]);
+  });
+
+  it("legacy skill without level restores without crash", () => {
+    const legacy = makeWizardData();
+    legacy.skills = [{ name: "Старый навык" }];
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(legacy)));
+    expect(restored?.data.skills[0].name).toBe("Старый навык");
+    expect(restored?.data.skills[0].level).toBeUndefined();
+  });
+});

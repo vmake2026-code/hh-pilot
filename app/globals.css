@@ -562,6 +562,16 @@ h1 {
   font-size: 14px;
 }
 
+.skill-level-select {
+  width: auto;
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  height: auto;
+  border: none;
+  background: transparent;
+}
+
 .skill-remove {
   background: none;
   border: none;

@@ -22,7 +22,7 @@ import {
   type WizardStep,
 } from "@/features/resume-wizard";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
-import { EDUCATION_LEVEL_LABELS, educationLevelLabel } from "@/types/resume";
+import { EDUCATION_LEVEL_LABELS, educationLevelLabel, SKILL_LEVEL_LABELS, normalizeSkillLevel, skillLevelLabel } from "@/types/resume";
 import type { WorkExperience, Education } from "@/types/resume";
 import WizardProgress from "@/components/wizard/progress";
 import WizardLayout from "@/components/wizard/wizard-layout";
@@ -241,6 +241,19 @@ export default function WizardClient() {
     setData((prev) => ({
       ...prev,
       skills: prev.skills.filter((s) => s.name !== name),
+    }));
+  }, []);
+
+  // P9.2: change the level of exactly one skill, preserving order/other fields.
+  const updateSkillLevel = useCallback((name: string, level: string) => {
+    const normalized = normalizeSkillLevel(level);
+    setData((prev) => ({
+      ...prev,
+      skills: prev.skills.map((s) =>
+        s.name === name
+          ? { ...s, ...(normalized ? { level: normalized } : { level: undefined }) }
+          : s,
+      ),
     }));
   }, []);
 
@@ -657,6 +670,17 @@ export default function WizardClient() {
             {data.skills.map((skill) => (
               <span key={skill.name} className="skill-tag">
                 {skill.name}
+                <select
+                  className="form-input skill-level-select"
+                  value={normalizeSkillLevel(skill.level) ?? ""}
+                  onChange={(e) => updateSkillLevel(skill.name, e.target.value)}
+                  aria-label={`Уровень: ${skill.name}`}
+                >
+                  <option value="">— уровень —</option>
+                  {Object.entries(SKILL_LEVEL_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
                 <button
                   type="button"
                   className="skill-remove"
@@ -778,7 +802,9 @@ export default function WizardClient() {
             <h4>Навыки</h4>
             <div className="skill-list">
               {data.skills.map((s) => (
-                <span key={s.name} className="skill-tag">{s.name}</span>
+                <span key={s.name} className="skill-tag">
+                {s.name}{skillLevelLabel(s.level) ? ` — ${skillLevelLabel(s.level)}` : ""}
+              </span>
               ))}
             </div>
           </div>

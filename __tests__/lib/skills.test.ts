@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeSkill, dedupeSkills, SKILL_ALIASES } from "../../lib/skills";
+import { normalizeSkillLevel, skillLevelLabel } from "../../types/resume";
 import { normalizeSkill as matchingNormalize } from "../../services/matching";
 import { normalizeSkill as importNormalize } from "../../services/vacancy-import";
 
@@ -133,5 +134,32 @@ describe("lib/skills dedupeSkills", () => {
 
   it("keeps unique lists unchanged", () => {
     expect(dedupeSkills(["React", "TypeScript", "Vue"])).toEqual(["React", "TypeScript", "Vue"]);
+  });
+});
+
+// ---------- P9.2 Skill level labels & legacy normalization ----------
+
+describe("skill level labels (P9.2)", () => {
+  it("maps the HH triad to Russian labels", () => {
+    expect(skillLevelLabel("beginner")).toBe("Базовый");
+    expect(skillLevelLabel("intermediate")).toBe("Средний");
+    expect(skillLevelLabel("advanced")).toBe("Продвинутый");
+  });
+
+  it("legacy 'expert' displays as Продвинутый", () => {
+    expect(skillLevelLabel("expert")).toBe("Продвинутый");
+  });
+
+  it("missing/unknown levels render as empty string", () => {
+    expect(skillLevelLabel(undefined)).toBe("");
+    expect(skillLevelLabel("novice")).toBe("");
+  });
+
+  it("normalizeSkillLevel: triad passthrough, expert->advanced, garbage->undefined", () => {
+    expect(normalizeSkillLevel("beginner")).toBe("beginner");
+    expect(normalizeSkillLevel("advanced")).toBe("advanced");
+    expect(normalizeSkillLevel("expert")).toBe("advanced");
+    expect(normalizeSkillLevel("nope")).toBeUndefined();
+    expect(normalizeSkillLevel(undefined)).toBeUndefined();
   });
 });

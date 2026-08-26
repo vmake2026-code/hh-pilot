@@ -7,11 +7,13 @@ import {
   validateDateRange,
   validateWorkExperience,
   validateEducation,
+  validateSkills,
   validateStep1,
   validateStep2,
   validateStep3,
   validateStep4,
 } from "../../lib/validation";
+import { createDefaultWizardData, validateWizardStep } from "../../features/resume-wizard";
 
 describe("validateRequired", () => {
   it("rejects empty strings", () => {
@@ -215,5 +217,45 @@ describe("validateStep3", () => {
 describe("validateStep4", () => {
   it("passes with empty education", () => {
     expect(validateStep4([]).valid).toBe(true);
+  });
+});
+
+// ---------- P9.2 Skill level validation ----------
+
+describe("validateSkills", () => {
+  it("flags skills without a valid level", () => {
+    const errors = validateSkills([
+      { name: "React" },
+      { name: "Vue", level: "advanced" },
+      // @ts-expect-error runtime guard against arbitrary strings
+      { name: "SQL", level: "expert-legacy" },
+    ]);
+    expect(errors["skills[0].level"]).toBeDefined();
+    expect(errors["skills[1].level"]).toBeUndefined();
+    expect(errors["skills[2].level"]).toBeDefined();
+  });
+
+  it("passes when every skill has an HH-triad level", () => {
+    const errors = validateSkills([
+      { name: "React", level: "advanced" },
+      { name: "Vue", level: "beginner" },
+      { name: "SQL", level: "intermediate" },
+    ]);
+    expect(Object.keys(errors).length).toBe(0);
+  });
+});
+
+describe("validateWizardStep step 5 (P9.2)", () => {
+  it("blocks Next while any skill lacks a level", () => {
+    const data = createDefaultWizardData();
+    data.skills = [{ name: "React" }];
+    const result = validateWizardStep(5, data);
+    expect(result.valid).toBe(false);
+  });
+
+  it("allows Next when all levels are chosen", () => {
+    const data = createDefaultWizardData();
+    data.skills = [{ name: "React", level: "intermediate" }];
+    expect(validateWizardStep(5, data).valid).toBe(true);
   });
 });

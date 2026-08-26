@@ -6,7 +6,7 @@ import { getResumeRecord } from "@/services/resume-persistence";
 import { useClientData } from "@/features/use-client-data";
 import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
-import { educationLevelLabel } from "@/types/resume";
+import { educationLevelLabel, skillLevelLabel } from "@/types/resume";
 import type { ResumeVersion } from "@/types/resume";
 import type { Confident } from "@/types/confirmation";
 import { isConfirmed, isInferred, getFieldValue } from "@/types/confirmation";
@@ -196,9 +196,14 @@ export default function ResumePreviewPage({
           <section className="resume-section">
             <h2>Навыки</h2>
             <div className="resume-skills">
-              {vd.skills.map((s) => (
-                <span key={s.name} className="resume-skill">{s.name}</span>
-              ))}
+            {vd.skills.map((s) => {
+              const lvl = skillLevelLabel(s.level);
+              return (
+                <span key={s.name} className="resume-skill">
+                  {s.name}{lvl ? ` — ${lvl}` : ""}
+                </span>
+              );
+            })}
             </div>
           </section>
         )}

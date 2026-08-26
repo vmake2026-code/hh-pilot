@@ -37,9 +37,34 @@ interface Education {
   description: string;
 }
 
+/** Skill proficiency levels used by the current HH flow (P9.2 triad). */
+type SkillLevel = "beginner" | "intermediate" | "advanced";
+
+const SKILL_LEVEL_LABELS: Record<SkillLevel, string> = {
+  beginner: "Базовый",
+  intermediate: "Средний",
+  advanced: "Продвинутый",
+};
+
+/**
+ * Legacy value persisted before the HH-triad ("expert") is normalized
+ * to "advanced" on read; raw storage is never silently rewritten.
+ */
+function normalizeSkillLevel(raw: unknown): SkillLevel | undefined {
+  if (raw === "beginner" || raw === "intermediate" || raw === "advanced") return raw;
+  if (raw === "expert") return "advanced";
+  return undefined;
+}
+
+/** Russian display label; empty string for missing/unknown levels. */
+function skillLevelLabel(raw: unknown): string {
+  const level = normalizeSkillLevel(raw);
+  return level ? SKILL_LEVEL_LABELS[level] : "";
+}
+
 interface Skill {
   name: string;
-  level?: "beginner" | "intermediate" | "advanced" | "expert";
+  level?: SkillLevel;
   category?: string;
 }
 
@@ -110,10 +135,17 @@ export type {
   Education,
   EducationLevel,
   Skill,
+  SkillLevel,
   Resume,
   ResumeVersion,
   CandidateInfo,
   ResumeRecord,
 };
 
-export { EDUCATION_LEVEL_LABELS, educationLevelLabel };
+export {
+  EDUCATION_LEVEL_LABELS,
+  educationLevelLabel,
+  SKILL_LEVEL_LABELS,
+  normalizeSkillLevel,
+  skillLevelLabel,
+};

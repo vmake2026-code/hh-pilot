@@ -1,7 +1,7 @@
 import type { WorkExperience, Education, Skill, ResumeRecord, ResumeVersion } from "../types/resume";
 import type { Confident } from "../types/confirmation";
 import { confirmField, missingField } from "../types/confirmation";
-import { validateStep1, validateStep2, validateStep3, validateStep4 } from "../lib/validation";
+import { validateStep1, validateStep2, validateStep3, validateStep4, validateStep5 } from "../lib/validation";
 import { generateId } from "../lib/ids";
 import { createResumeEngine } from "../services/resume";
 import { saveResumeRecord, getResumeRecord } from "../services/resume-persistence";
@@ -188,6 +188,8 @@ function validateWizardStep(
       return validateStep3(data.workExperience);
     case 4:
       return validateStep4(data.education);
+    case 5:
+      return validateStep5(data.skills);
     default:
       return { valid: true, errors: {} };
   }

@@ -1,5 +1,5 @@
-import { educationLevelLabel } from "../types/resume";
-import type { WorkExperience, Education } from "../types/resume";
+import { educationLevelLabel, skillLevelLabel } from "../types/resume";
+import type { WorkExperience, Education, Skill } from "../types/resume";
 
 type ValidationErrors = Record<string, string>;
 
@@ -93,6 +93,17 @@ function validateEducation(items: Education[]): ValidationErrors {
   return errors;
 }
 
+/** Every added skill must carry a valid HH-triad level before finalizing. */
+function validateSkills(items: Skill[]): ValidationErrors {
+  const errors: ValidationErrors = {};
+  items.forEach((item, index) => {
+    if (!skillLevelLabel(item.level)) {
+      errors[`skills[${index}].level`] = `Укажите уровень для навыка "${item.name}"`;
+    }
+  });
+  return errors;
+}
+
 // ---------- Step-level validators ----------
 
 interface StepValidationResult {
@@ -146,7 +157,12 @@ function validateStep4(items: Education[]): StepValidationResult {
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
-// Step 5 (skills) and Step 6 (additional) have no required fields
+// Step 6 (additional) has no required fields
+
+function validateStep5(items: Skill[]): StepValidationResult {
+  const errors = validateSkills(items);
+  return { valid: Object.keys(errors).length === 0, errors };
+}
 
 function validateAllSteps(data: {
   firstName: string;
@@ -175,9 +191,11 @@ export {
   validateDateRange,
   validateWorkExperience,
   validateEducation,
+  validateSkills,
   validateStep1,
   validateStep2,
   validateStep3,
   validateStep4,
+  validateStep5,
   validateAllSteps,
 };
