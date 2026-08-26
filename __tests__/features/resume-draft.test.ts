@@ -141,3 +141,29 @@ describe("draft independence from confirmations (P6.3)", () => {
     expect(restored?.confirmedFields).toEqual(["phone"]);
   });
 });
+
+// ---------- P9.1 Education level in draft ----------
+
+describe("education level draft roundtrip (P9.1)", () => {
+  it("preserves Skill-like extra fields: education level survives JSON envelope", () => {
+    const data = makeWizardData();
+    data.education = [
+      { id: "e1", institution: "МГУ", degree: "Бакалавр", field: "Информатика", startDate: "09/2016", endDate: "06/2020", description: "", level: "higher" },
+      { id: "e2", institution: "Колледж", degree: "Техник", field: "Сети", startDate: "09/2012", endDate: "06/2016", description: "", level: "secondary_special" },
+    ];
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(createDraftState(data, 4, new Set()))));
+
+    expect(restored?.data.education[0].level).toBe("higher");
+    expect(restored?.data.education[1].level).toBe("secondary_special");
+  });
+
+  it("legacy education without level stays restorable (undefined, no crash)", () => {
+    const legacy = makeWizardData();
+    legacy.education = [
+      { id: "e1", institution: "Старый вуз", degree: "Специалист", field: "Физика", startDate: "2005-09", endDate: null, description: "" } as WizardData["education"][number],
+    ];
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(legacy)));
+    expect(restored?.data.education[0].institution).toBe("Старый вуз");
+    expect(restored?.data.education[0].level).toBeUndefined();
+  });
+});

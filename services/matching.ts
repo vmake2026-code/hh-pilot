@@ -1,4 +1,5 @@
 import type { ResumeVersion, Skill, Education } from "../types/resume";
+import { educationLevelLabel } from "../types/resume";
 import type { Vacancy } from "../types/vacancy";
 import type { MatchResult, MatchedRequirement } from "../types/match";
 import { scoreToLevel } from "../types/match";
@@ -78,7 +79,8 @@ function matchRequirements(
     .join(" ")
     .toLowerCase();
   const educationText = resumeEducation.map((e) =>
-    `${e.institution} ${e.degree} ${e.field}`.toLowerCase(),
+    `${educationLevelLabel(e.level)} ${e.institution} ${e.degree} ${e.field}`
+      .toLowerCase(),
   );
 
   const matched: MatchedRequirement[] = [];

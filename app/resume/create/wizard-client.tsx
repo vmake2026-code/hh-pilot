@@ -22,6 +22,7 @@ import {
   type WizardStep,
 } from "@/features/resume-wizard";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
+import { EDUCATION_LEVEL_LABELS, educationLevelLabel } from "@/types/resume";
 import type { WorkExperience, Education } from "@/types/resume";
 import WizardProgress from "@/components/wizard/progress";
 import WizardLayout from "@/components/wizard/wizard-layout";
@@ -201,7 +202,7 @@ export default function WizardClient() {
   }, []);
 
   const updateEdu = useCallback(
-    (id: string, field: keyof Education, value: string | boolean | null) => {
+    (id: string, field: keyof Education, value: string | boolean | null | undefined) => {
       setData((prev) => ({
         ...prev,
         education: prev.education.map((e) =>
@@ -574,6 +575,16 @@ export default function WizardClient() {
               onChange={(v) => updateEdu(edu.id, "degree", v)}
             />
             <FormField
+              label="Уровень образования"
+              name={`edu-${edu.id}-level`}
+              type="select"
+              value={edu.level ?? ""}
+              error={errors[`edu[${index}].level`]}
+              required
+              options={Object.entries(EDUCATION_LEVEL_LABELS).map(([value, label]) => ({ value, label }))}
+              onChange={(v) => updateEdu(edu.id, "level", v || undefined)}
+            />
+            <FormField
               label="Специальность"
               name={`edu-${edu.id}-field`}
               value={edu.field}
@@ -751,6 +762,7 @@ export default function WizardClient() {
                   <strong>{e.degree || "(степень не указана)"}</strong>
                   {e.field ? `, ${e.field}` : ""}
                 </p>
+                {educationLevelLabel(e.level) && <p>{educationLevelLabel(e.level)}</p>}
                 <p>{e.institution || "(учреждение не указано)"}</p>
                 <p className="preview-dates">
                   {e.startDate}

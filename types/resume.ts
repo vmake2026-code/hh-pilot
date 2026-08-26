@@ -11,8 +11,24 @@ interface WorkExperience {
   achievements: string[];
 }
 
+/** Education levels used by the current HH flow. */
+type EducationLevel = "higher" | "secondary_special" | "secondary";
+
+const EDUCATION_LEVEL_LABELS: Record<EducationLevel, string> = {
+  higher: "Высшее",
+  secondary_special: "Среднее специальное",
+  secondary: "Среднее",
+};
+
+/** Russian display label for a level; empty string for legacy/undefined. */
+function educationLevelLabel(level: EducationLevel | undefined): string {
+  return level ? EDUCATION_LEVEL_LABELS[level] ?? "" : "";
+}
+
 interface Education {
   id: string;
+  /** Optional for legacy records created before P9.1. */
+  level?: EducationLevel;
   institution: string;
   degree: string;
   field: string;
@@ -92,9 +108,12 @@ interface ResumeRecord {
 export type {
   WorkExperience,
   Education,
+  EducationLevel,
   Skill,
   Resume,
   ResumeVersion,
   CandidateInfo,
   ResumeRecord,
 };
+
+export { EDUCATION_LEVEL_LABELS, educationLevelLabel };

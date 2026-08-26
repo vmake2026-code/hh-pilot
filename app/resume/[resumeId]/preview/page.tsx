@@ -6,6 +6,7 @@ import { getResumeRecord } from "@/services/resume-persistence";
 import { useClientData } from "@/features/use-client-data";
 import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
+import { educationLevelLabel } from "@/types/resume";
 import type { ResumeVersion } from "@/types/resume";
 import type { Confident } from "@/types/confirmation";
 import { isConfirmed, isInferred, getFieldValue } from "@/types/confirmation";
@@ -181,6 +182,9 @@ export default function ResumePreviewPage({
                     {e.endDate ? ` — ${formatDate(e.endDate)}` : ""}
                   </span>
                 </div>
+                {educationLevelLabel(e.level) && (
+                  <p className="resume-edu-inst">{educationLevelLabel(e.level)}</p>
+                )}
                 <p className="resume-edu-inst">{e.institution}</p>
               </div>
             ))}

@@ -35,6 +35,7 @@ function makeValidWizardData(): WizardData {
     education: [
       {
         id: "edu-1",
+        level: "higher",
         institution: "МГУ",
         degree: "Бакалавр",
         field: "Информатика",
@@ -246,6 +247,34 @@ describe("resumeRecordToWizardData", () => {
     const newVersion = createNewVersion(restored, record, confirmed);
     expect(newVersion.data.workFormat).toBe("remote");
     expect(newVersion.data.employmentType).toBe("full_time");
+  });
+
+  // ---------- P9.1 Education level lifecycle ----------
+
+  it("finalize puts education level into ResumeVersion.data (P9.1)", () => {
+    const { version } = finalizeResume(makeValidWizardData(), makeAllConfirmed());
+    expect(version.data.education[0].level).toBe("higher");
+    // NOTE: mock-engine createBlank оставляет resume.education пустым —
+    // канонические данные образования живут в versions[*].data (используются preview/matching).
+  });
+
+  it("edit roundtrip restores education level back into WizardData (P9.1)", () => {
+    const { record } = finalizeResume(makeValidWizardData(), makeAllConfirmed());
+    const restored = resumeRecordToWizardData(record);
+    expect(restored.education[0].level).toBe("higher");
+
+    // re-save keeps the level
+    const newVersion = createNewVersion(restored, record, makeAllConfirmed());
+    expect(newVersion.data.education[0].level).toBe("higher");
+  });
+
+  it("legacy education without level loads without crash (P9.1)", () => {
+    const { record } = finalizeResume(makeValidWizardData(), makeAllConfirmed());
+    delete (record.versions[0].data.education[0] as { level?: unknown }).level;
+
+    const restored = resumeRecordToWizardData(record);
+    expect(restored.education[0].institution).toBe("МГУ");
+    expect(restored.education[0].level).toBeUndefined();
   });
 });
 

@@ -1,3 +1,4 @@
+import { educationLevelLabel } from "../types/resume";
 import type { WorkExperience, Education } from "../types/resume";
 
 type ValidationErrors = Record<string, string>;
@@ -75,6 +76,11 @@ function validateEducation(items: Education[]): ValidationErrors {
   const errors: ValidationErrors = {};
   items.forEach((item, index) => {
     const prefix = `edu[${index}]`;
+    // Level must be a real EducationLevel, not an arbitrary string.
+    if (!item.level || !educationLevelLabel(item.level)) {
+      errors[`${prefix}.level`] = `Укажите уровень образования для "Образование #${index + 1}"`;
+    }
+
     const instErr = validateRequired(item.institution, `Образование #${index + 1}: Учебное заведение`);
     if (instErr) errors[`${prefix}.institution`] = instErr;
 

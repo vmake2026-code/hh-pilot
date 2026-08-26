@@ -645,3 +645,56 @@ describe("calculateMatch MM/YYYY experience integration (P7.3 lock)", () => {
     expect(sufficient.risks).toEqual([]);
   });
 });
+
+// ---------- P9.1: education level in education haystack ----------
+
+describe("matchRequirements education level (P9.1)", () => {
+  const edu = (level: "higher" | "secondary_special" | "secondary" | undefined, over: Partial<{ institution: string; degree: string; field: string }> = {}) => ({
+    id: "e1",
+    level,
+    institution: "",
+    degree: "",
+    field: "",
+    startDate: "09/2016",
+    endDate: "06/2020",
+    description: "",
+    ...over,
+  });
+  const req = (text: string) => [{ id: "r1", text, isRequired: true, category: "education" as const }];
+
+  it("'Высшее образование' matches via level=higher alone", () => {
+    const r = matchRequirements(req("Высшее образование"), [], [], [], [], [edu("higher")]);
+    expect(r.matched.length).toBe(1);
+  });
+
+  it("'Среднее специальное' requirement matches secondary_special level", () => {
+    const r = matchRequirements(req("Среднее специальное образование"), [], [], [], [], [edu("secondary_special")]);
+    // «среднее»+«специальное» из лейбла, «образование» отсутствует → 2/3 >= ceil(1.5)
+    expect(r.matched.length).toBe(1);
+  });
+
+  it("'Высшее образование' does NOT match level=secondary (no false positive)", () => {
+    const r = matchRequirements(req("Высшее образование"), [], [], [], [], [edu("secondary")]);
+    expect(r.matched.length).toBe(0);
+    expect(r.missing.length).toBe(1);
+  });
+
+  it("legacy education without level keeps institution/degree/field matching", () => {
+    // NOTE: слова короче 4 символов отсекаются порогом (>3) — «МГУ» не участвует.
+    const r = matchRequirements(
+      [{ id: "r1", text: "Университет технический профиль", isRequired: true, category: "education" }],
+      [], [], [],
+      [],
+      [edu(undefined, { institution: "Технический университет", field: "Профильный" })],
+    );
+    expect(r.matched.length).toBe(1);
+  });
+
+  it("scope guard: level text invisible to non-education categories", () => {
+    const withLevelOnly = [edu("secondary_special")];
+    const skillReq = [{ id: "s1", text: "Среднее специальное оборудование", isRequired: true }];
+    const langReq = [{ id: "l1", text: "Среднее специальное знание языка", isRequired: true, category: "language" as const }];
+    expect(matchRequirements(skillReq, [], [], [], [], withLevelOnly).matched.length).toBe(0);
+    expect(matchRequirements(langReq, [], [], [], [], withLevelOnly).matched.length).toBe(0);
+  });
+});

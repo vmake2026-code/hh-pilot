@@ -142,11 +142,27 @@ describe("validateWorkExperience", () => {
 describe("validateEducation", () => {
   it("returns errors for empty education entries", () => {
     const items = [
-      { id: "1", institution: "", degree: "", field: "", startDate: "", endDate: null, description: "" },
+      { id: "1", level: undefined, institution: "", degree: "", field: "", startDate: "", endDate: null, description: "" },
     ];
     const errors = validateEducation(items);
+    expect(errors["edu[0].level"]).toBeDefined();
     expect(errors["edu[0].institution"]).toBeDefined();
     expect(errors["edu[0].degree"]).toBeDefined();
+  });
+
+  it("returns no errors for a fully valid entry (P9.1)", () => {
+    const errors = validateEducation([
+      { id: "1", level: "higher", institution: "МГУ", degree: "Бакалавр", field: "Информатика", startDate: "09/2016", endDate: "06/2020", description: "" },
+    ]);
+    expect(Object.keys(errors).length).toBe(0);
+  });
+
+  it.each(["xyz", "", "13/2020"])("rejects arbitrary level %j", (level) => {
+    const errors = validateEducation([
+      // @ts-expect-error — проверяем рантайм-отклонение произвольных строк
+      { id: "1", level, institution: "МГУ", degree: "Бакалавр", field: "", startDate: "09/2016", endDate: null, description: "" },
+    ]);
+    expect(errors["edu[0].level"]).toBeDefined();
   });
 });
 
