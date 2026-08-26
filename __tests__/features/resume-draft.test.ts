@@ -205,3 +205,28 @@ describe("education level draft roundtrip all 8 (P9.1.1)", () => {
     expect(restored?.data.education.map((e) => e.level)).toEqual([...levels]);
   });
 });
+
+// ---------- P9.3 achievements draft roundtrip & legacy ----------
+
+describe("achievements draft roundtrip (P9.3)", () => {
+  it("preserves achievements of multiple jobs after JSON envelope", () => {
+    const data = makeWizardData();
+    data.workExperience = [
+      { id: "w1", company: "A", position: "Dev", startDate: "01/2020", endDate: null, isCurrent: true, description: "", achievements: ["A", "B"] },
+      { id: "w2", company: "B", position: "Lead", startDate: "01/2018", endDate: "01/2020", isCurrent: false, description: "", achievements: ["C"] },
+    ];
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(createDraftState(data, 3, new Set()))));
+    expect(restored?.data.workExperience[0].achievements).toEqual(["A", "B"]);
+    expect(restored?.data.workExperience[1].achievements).toEqual(["C"]);
+  });
+
+  it("legacy work entry without achievements key restores without crash", () => {
+    const legacy = makeWizardData();
+    legacy.workExperience = [
+      { id: "w1", company: "Old Co", position: "Dev", startDate: "01/2015", endDate: "01/2017", isCurrent: false, description: "работа" } as WizardData["workExperience"][number],
+    ];
+    const restored = normalizeDraft(JSON.parse(JSON.stringify(legacy)));
+    expect(restored?.data.workExperience[0].company).toBe("Old Co");
+    expect(restored?.data.workExperience[0].achievements).toBeUndefined();
+  });
+});

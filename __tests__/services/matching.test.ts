@@ -748,3 +748,28 @@ describe("matchRequirements education level HH matrix (P9.1.1)", () => {
     expect(matchRequirements([{ id: "l1", text: "Бакалавр язык", isRequired: true, category: "language" }], [], [], [], [], edu).matched.length).toBe(0);
   });
 });
+
+// ---------- P9.3 regression lock: achievements must NOT affect matching ----------
+
+describe("calculateMatch achievements invariance (P9.3)", () => {
+  it("identical resumes with/without achievements produce identical results", () => {
+    const v = makeVacancy();
+    const withoutAch = makeVersion();
+    const withAch = makeVersion({
+      workExperience: [
+        { id: "w1", company: "A", position: "Frontend Developer", startDate: "01/2020", endDate: null, isCurrent: true, description: "Разработка React приложений", achievements: ["Увеличил продажи на 50%", "Открыл новый канал продаж"] },
+      ],
+    });
+
+    const rWithout = calculateMatch(v, withoutAch, "res1");
+    const rWith = calculateMatch(v, withAch, "res1");
+
+    expect(rWith.overallScore).toBe(rWithout.overallScore);
+    expect(rWith.level).toBe(rWithout.level);
+    expect(rWith.risks).toEqual(rWithout.risks);
+    expect(rWith.matchedSkills).toEqual(rWithout.matchedSkills);
+    expect(rWith.missingSkills).toEqual(rWithout.missingSkills);
+    expect(rWith.matchedRequirements).toEqual(rWithout.matchedRequirements);
+    expect(rWith.missingRequirements).toEqual(rWithout.missingRequirements);
+  });
+});

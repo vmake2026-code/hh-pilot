@@ -18,6 +18,8 @@ import {
   draftKeyFor,
   createDraftState,
   normalizeDraft,
+  parseAchievements,
+  achievementsToText,
   type WizardData,
   type WizardStep,
 } from "@/features/resume-wizard";
@@ -175,7 +177,7 @@ export default function WizardClient() {
   }, []);
 
   const updateWork = useCallback(
-    (id: string, field: keyof WorkExperience, value: string | boolean | null) => {
+    (id: string, field: keyof WorkExperience, value: string | boolean | null | string[]) => {
       setData((prev) => ({
         ...prev,
         workExperience: prev.workExperience.map((w) =>
@@ -532,6 +534,15 @@ export default function WizardClient() {
               placeholder="Что вы делали на этой позиции"
               onChange={(v) => updateWork(work.id, "description", v)}
             />
+            <FormField
+              label="Достижения"
+              name={`work-${work.id}-achievements`}
+              type="textarea"
+              value={achievementsToText(work.achievements)}
+              placeholder={"По одному достижению на строку\nНапример: Увеличил продажи на 30%"}
+              rows={3}
+              onChange={(v) => updateWork(work.id, "achievements", parseAchievements(v))}
+            />
             <div className="wizard-hint-box">
               <p className="wizard-hint-small">
                 Достижения — необязательно. Мы поможем сформулировать их
@@ -772,6 +783,16 @@ export default function WizardClient() {
                   {w.endDate ? ` — ${w.endDate}` : w.isCurrent ? " — по настоящее время" : ""}
                 </p>
                 {w.description && <p>{w.description}</p>}
+                {w.achievements.length > 0 && (
+                  <div className="preview-achievements">
+                    <p>Достижения:</p>
+                    <ul className="resume-exp-achievements">
+                      {w.achievements.map((a, i) => (
+                        <li key={i}>{a}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             ))}
           </div>

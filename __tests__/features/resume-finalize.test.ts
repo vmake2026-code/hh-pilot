@@ -354,3 +354,48 @@ describe("education level finalize & edit all 8 (P9.1.1)", () => {
     expect(restored.education.map((e) => e.level)).toEqual([...levels]);
   });
 });
+
+// ---------- P9.3 achievements: finalize / edit / isolation ----------
+
+describe("achievements finalize & edit (P9.3)", () => {
+  function dataWithAchievements() {
+    const data = makeValidWizardData();
+    data.workExperience = [
+      { id: "w1", company: "Alpha", position: "Sales", startDate: "01/2020", endDate: null, isCurrent: true, description: "Продажи", achievements: ["A", "B"] },
+      { id: "w2", company: "Beta", position: "Lead", startDate: "01/2018", endDate: "01/2020", isCurrent: false, description: "Управление", achievements: ["C"] },
+    ];
+    return data;
+  }
+
+  it("finalize keeps achievements in ResumeVersion.data (TEST 5)", () => {
+    const { version } = finalizeResume(dataWithAchievements(), makeAllConfirmed());
+    expect(version.data.workExperience[0].achievements).toEqual(["A", "B"]);
+    expect(version.data.workExperience[1].achievements).toEqual(["C"]);
+  });
+
+  it("edit restores achievements back into WizardData (TEST 6)", () => {
+    const { record } = finalizeResume(dataWithAchievements(), makeAllConfirmed());
+    const restored = resumeRecordToWizardData(record);
+    expect(restored.workExperience[0].achievements).toEqual(["A", "B"]);
+    expect(restored.workExperience[1].achievements).toEqual(["C"]);
+  });
+
+  it("re-save after editing an unrelated field preserves achievements (TEST 7)", () => {
+    const { record } = finalizeResume(dataWithAchievements(), makeAllConfirmed());
+    const restored = resumeRecordToWizardData(record);
+    const edited = { ...restored, summary: "Новый summary" };
+    const newVersion = createNewVersion(edited, record, makeAllConfirmed());
+    expect(newVersion.data.workExperience[0].achievements).toEqual(["A", "B"]);
+    expect(newVersion.data.workExperience[1].achievements).toEqual(["C"]);
+  });
+
+  it("editing job 2 does not touch job 1 achievements (TEST 8)", () => {
+    const { record } = finalizeResume(dataWithAchievements(), makeAllConfirmed());
+    const restored = resumeRecordToWizardData(record);
+    restored.workExperience[1].achievements = ["C-updated"];
+
+    const newVersion = createNewVersion(restored, record, makeAllConfirmed());
+    expect(newVersion.data.workExperience[0].achievements).toEqual(["A", "B"]);
+    expect(newVersion.data.workExperience[1].achievements).toEqual(["C-updated"]);
+  });
+});

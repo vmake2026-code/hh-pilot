@@ -173,6 +173,21 @@ function canFinalize(
   return { allowed: blocking.length === 0, blockingFields: blocking };
 }
 
+// ---------- Achievements (P9.3) ----------
+
+/** Textarea text ("one achievement per line") -> string[]: trim, drop empties, keep order. */
+function parseAchievements(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/** string[] -> textarea text. Legacy/undefined safely renders as an empty string. */
+function achievementsToText(achievements: string[] | undefined): string {
+  return (achievements ?? []).join("\n");
+}
+
 // ---------- Validation per step ----------
 
 function validateWizardStep(
@@ -446,4 +461,6 @@ export {
   draftKeyFor,
   createDraftState,
   normalizeDraft,
+  parseAchievements,
+  achievementsToText,
 };

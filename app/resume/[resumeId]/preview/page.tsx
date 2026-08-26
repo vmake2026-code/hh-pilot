@@ -154,13 +154,13 @@ export default function ResumePreviewPage({
                 {w.description && (
                   <p className="resume-exp-desc">{w.description}</p>
                 )}
-                {w.achievements.length > 0 && (
-                  <ul className="resume-exp-achievements">
-                    {w.achievements.map((a, i) => (
-                      <li key={i}>{a}</li>
-                    ))}
-                  </ul>
-                )}
+                  {(w.achievements ?? []).length > 0 && (
+                    <ul className="resume-exp-achievements">
+                      {(w.achievements ?? []).map((a, i) => (
+                        <li key={i}>{a}</li>
+                      ))}
+                    </ul>
+                  )}
               </div>
             ))}
           </section>
