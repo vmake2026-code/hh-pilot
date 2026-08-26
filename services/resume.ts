@@ -1,4 +1,4 @@
-import type { Resume, ResumeVersion } from "../types/resume";
+import type { Resume, ResumeAnalysisInput, ResumeVersion } from "../types/resume";
 import type { CandidateProfile } from "../types/candidate";
 import type { Vacancy } from "../types/vacancy";
 import type { ResumeAnalysis } from "../types/analysis";
@@ -10,7 +10,7 @@ interface ResumeEngine {
   importResume(content: string, format: "text" | "pdf" | "docx"): Promise<Resume>;
   normalizeResume(resume: Resume): Resume;
   createVersion(resume: Resume, changes: Partial<ResumeVersion["data"]>, versionNumber?: number): ResumeVersion;
-  analyzeResume(resume: Resume, vacancy?: Vacancy): Promise<ResumeAnalysis>;
+  analyzeResume(resume: ResumeAnalysisInput, context?: { versionId?: string }): Promise<ResumeAnalysis>;
   adaptToVacancy(resume: Resume, vacancy: Vacancy): Promise<Resume>;
 }
 
@@ -91,12 +91,14 @@ class MockResumeEngine implements ResumeEngine {
   }
 
   async analyzeResume(
-    resume: Resume,
-    _vacancy?: Vacancy,
+    resume: ResumeAnalysisInput,
+    context?: { versionId?: string },
   ): Promise<ResumeAnalysis> {
     return {
       id: generateId(),
       resumeId: resume.id,
+      versionId: context?.versionId ?? "unknown",
+      provider: "mock",
       overallScore: 70,
       sections: [],
       summary: "Mock-анализ: резюме требует доработки",

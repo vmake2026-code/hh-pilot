@@ -3,6 +3,7 @@ import {
   MockAIGateway,
   MockProvider,
   createAIGateway,
+  normalizeAnalysis,
 } from "../../services/ai";
 import type { Resume } from "../../types/resume";
 import type { Vacancy } from "../../types/vacancy";
@@ -110,5 +111,85 @@ describe("MockProvider", () => {
     expect(result.content).toContain("mock");
     expect(result.usage).toBeDefined();
     expect(result.usage!.totalTokens).toBeGreaterThan(0);
+  });
+});
+
+// ---------- P10.1: normalizeAnalysis guard ----------
+
+function validAnalysisPayload() {
+  return {
+    id: "an-1",
+    resumeId: "res-test",
+    versionId: "v-1",
+    provider: "mock",
+    overallScore: 75,
+    sections: [{ section: "summary", score: 80, feedback: "ok", suggestions: ["s1"] }],
+    summary: "Summary",
+    strengths: ["S"],
+    weaknesses: ["W"],
+    recommendations: ["R"],
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+}
+
+describe("normalizeAnalysis (P10.1)", () => {
+  it("passes a fully valid payload", () => {
+    expect(normalizeAnalysis(validAnalysisPayload())).not.toBeNull();
+  });
+
+  it("rejects missing versionId (version binding is required)", () => {
+    const p = validAnalysisPayload() as Record<string, unknown>;
+    delete p.versionId;
+    expect(normalizeAnalysis(p)).toBeNull();
+  });
+
+  it("rejects out-of-bounds score", () => {
+    const p = validAnalysisPayload();
+    p.overallScore = 120;
+    expect(normalizeAnalysis(p)).toBeNull();
+    p.overallScore = -1;
+    expect(normalizeAnalysis(p)).toBeNull();
+  });
+
+  it("rejects non-string arrays", () => {
+    const p = validAnalysisPayload() as Record<string, unknown>;
+    p.strengths = [1, 2];
+    expect(normalizeAnalysis(p)).toBeNull();
+  });
+
+  it("rejects malformed sections", () => {
+    const p = validAnalysisPayload() as Record<string, unknown>;
+    p.sections = [{ section: "summary" }];
+    expect(normalizeAnalysis(p)).toBeNull();
+    p.sections = "not-an-array";
+    expect(normalizeAnalysis(p)).toBeNull();
+  });
+
+  it("rejects non-object and missing provider", () => {
+    expect(normalizeAnalysis(null)).toBeNull();
+    expect(normalizeAnalysis("text")).toBeNull();
+    const p = validAnalysisPayload() as Record<string, unknown>;
+    delete p.provider;
+    expect(normalizeAnalysis(p)).toBeNull();
+  });
+
+  it("analyzeResume does not mutate the input resume (P10.1)", async () => {
+    const gateway = createAIGateway();
+    const resume = makeResume();
+    resume.skills = [{ name: "React", level: "advanced" }];
+    resume.workExperience = [
+      { id: "w1", company: "A", position: "Dev", startDate: "01/2020", endDate: null, isCurrent: true, description: "D", achievements: ["A1"] },
+    ];
+    resume.education = [
+      { id: "e1", level: "higher", institution: "МГУ", degree: "", field: "", startDate: "", endDate: null, description: "" },
+    ];
+    const before = JSON.stringify(resume);
+
+    await gateway.analyzeResume(resume, { versionId: "v-9" });
+
+    expect(JSON.stringify(resume)).toBe(before);
+    expect(resume.skills[0].level).toBe("advanced");
+    expect(resume.workExperience[0].achievements).toEqual(["A1"]);
+    expect(resume.education[0].level).toBe("higher");
   });
 });

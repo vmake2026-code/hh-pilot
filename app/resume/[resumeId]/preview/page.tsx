@@ -1,9 +1,10 @@
 "use client";
 
-import { use, useCallback } from "react";
+import { use, useState, useCallback } from "react";
 import Link from "next/link";
 import { getResumeRecord } from "@/services/resume-persistence";
 import { useClientData } from "@/features/use-client-data";
+import { listAnalysesForResume, isAnalysisStale, selectLatestAnalysis, analyzeCurrentVersion } from "@/features/resume-analysis";
 import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS, EMPLOYMENT_TYPE_LABELS } from "@/types/candidate";
 import { educationLevelLabel, skillLevelLabel } from "@/types/resume";
@@ -36,6 +37,28 @@ export default function ResumePreviewPage({
   const { resumeId } = use(params);
   const loadRecord = useCallback(() => getResumeRecord(resumeId), [resumeId]);
   const { data: record, ready } = useClientData(loadRecord);
+  const analysesState = useClientData(() => listAnalysesForResume(resumeId));
+
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+
+  const handleAnalyze = useCallback(async () => {
+    if (!record || analyzing) return;
+    setAnalyzing(true);
+    setAnalysisError("");
+    const outcome = await analyzeCurrentVersion(record);
+    setAnalyzing(false);
+    if (!outcome.ok) {
+      setAnalysisError(outcome.error);
+      return;
+    }
+    analysesState.refresh();
+  }, [record, analyzing, analysesState]);
+
+  const latest = record && analysesState.ready && analysesState.data
+    ? selectLatestAnalysis(analysesState.data, record)
+    : null;
+  const stale = !!(record && latest && isAnalysisStale(latest, record));
 
   if (!ready) {
     return <Loading />;
@@ -94,6 +117,96 @@ export default function ResumePreviewPage({
           </Link>
         </div>
       </div>
+
+      {/* AI analysis (P10.1) */}
+      {record && (
+        <section className="resume-section">
+          <h2>AI-анализ резюме</h2>
+
+          {stale && (
+            <p className="wizard-hint">
+              Анализ относится к предыдущей версии резюме.
+            </p>
+          )}
+
+          {analysisError ? (
+            <>
+              <p className="form-error">Не удалось выполнить анализ: {analysisError}</p>
+              <button
+                type="button"
+                className="btn btn-secondary btn-md"
+                onClick={handleAnalyze}
+                disabled={analyzing}
+              >
+                Повторить
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary btn-md"
+              onClick={handleAnalyze}
+              disabled={analyzing}
+            >
+              {analyzing
+                ? "Анализируем…"
+                : latest && !stale
+                  ? "Анализировать заново"
+                  : stale
+                    ? "Анализировать текущую версию"
+                    : "Анализировать резюме"}
+            </button>
+          )}
+
+          {analyzing && <p className="wizard-hint">Идёт анализ…</p>}
+
+          {latest && !stale && (
+            <div className="resume-doc" style={{ marginTop: 12 }}>
+              <p><strong>Балл: {latest.overallScore} / 100</strong></p>
+              <p>{latest.summary}</p>
+
+              {latest.strengths.length > 0 && (
+                <>
+                  <h3>Сильные стороны</h3>
+                  <ul className="resume-exp-achievements">
+                    {latest.strengths.map((sItem, i) => (<li key={i}>{sItem}</li>))}
+                  </ul>
+                </>
+              )}
+
+              {latest.weaknesses.length > 0 && (
+                <>
+                  <h3>Что улучшить</h3>
+                  <ul className="resume-exp-achievements">
+                    {latest.weaknesses.map((wItem, i) => (<li key={i}>{wItem}</li>))}
+                  </ul>
+                </>
+              )}
+
+              {(latest.recommendations ?? []).length > 0 && (
+                <>
+                  <h3>Рекомендации</h3>
+                  <ul className="resume-exp-achievements">
+                    {(latest.recommendations ?? []).map((rItem, i) => (<li key={i}>{rItem}</li>))}
+                  </ul>
+                </>
+              )}
+
+              {latest.sections.length > 0 && (
+                <>
+                  <h3>По разделам</h3>
+                  {latest.sections.map((sec) => (
+                    <p key={sec.section}>
+                      <strong>{sec.section}: {sec.score}/100</strong> — {sec.feedback}
+                      {sec.suggestions.length > 0 && ` (${sec.suggestions.join("; ")})`}
+                    </p>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Resume document */}
       <div className="resume-doc">

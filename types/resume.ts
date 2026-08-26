@@ -143,6 +143,9 @@ interface ResumeRecord {
   updatedAt: string;
 }
 
+/** AI analysis input: everything except the privacy-sensitive salary field. */
+type ResumeAnalysisInput = Omit<Resume, "salaryExpectation">;
+
 export type {
   WorkExperience,
   Education,
@@ -150,6 +153,8 @@ export type {
   Skill,
   SkillLevel,
   Resume,
+  /** AI analysis input: everything except the privacy-sensitive salary field. */
+  ResumeAnalysisInput,
   ResumeVersion,
   CandidateInfo,
   ResumeRecord,
