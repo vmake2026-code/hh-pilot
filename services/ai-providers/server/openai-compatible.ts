@@ -14,16 +14,41 @@ export interface OpenAICompatibleConfig {
   apiKey: string;
 }
 
+/**
+ * P10.3A: три различимых состояния конфигурации.
+ * "mock" возможен ТОЛЬКО при явном AI_PROVIDER=mock;
+ * отсутствующий/неизвестный AI_PROVIDER — это configuration error,
+ * а не молчаливый fallback на mock.
+ */
+export type AIProviderConfigResult =
+  | { kind: "configured"; config: OpenAICompatibleConfig }
+  | { kind: "mock" }
+  | { kind: "invalid"; missing: string[] };
+
 /** Читает server-side env. Никогда не вызывается на клиенте. */
-export function readOpenAICompatibleConfigFromEnv(): OpenAICompatibleConfig | null {
+export function readOpenAICompatibleConfigFromEnv(): AIProviderConfigResult {
   const provider = process.env.AI_PROVIDER;
+
+  if (!provider) return { kind: "invalid", missing: ["AI_PROVIDER"] };
+  if (provider === "mock") return { kind: "mock" };
+  if (provider !== "openai-compatible") {
+    return { kind: "invalid", missing: ["AI_PROVIDER"] };
+  }
+
   const apiKey = process.env.AI_API_KEY;
   const model = process.env.AI_MODEL;
-  if (provider !== "openai-compatible" || !apiKey || !model) return null;
+  const missing: string[] = [];
+  if (!apiKey) missing.push("AI_API_KEY");
+  if (!model) missing.push("AI_MODEL");
+  if (missing.length > 0) return { kind: "invalid", missing };
+
   return {
-    baseUrl: (process.env.AI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
-    model,
-    apiKey,
+    kind: "configured",
+    config: {
+      baseUrl: (process.env.AI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ""),
+      model: model as string,
+      apiKey: apiKey as string,
+    },
   };
 }
 
