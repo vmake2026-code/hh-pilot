@@ -9,7 +9,9 @@ import {
   selectLatestAnalysis,
   listAnalysesForResume,
   RemoteAIGateway,
+  AIAnalysisError,
 } from "../../features/resume-analysis";
+import type { AIErrorCode } from "../../features/resume-analysis";
 import type { AIGateway } from "../../services/ai";
 import { confirmField, missingField } from "../../types/confirmation";
 
@@ -298,17 +300,165 @@ describe("RemoteAIGateway (P10.2)", () => {
     }
   });
 
-  it("server error -> controlled Error with message", async () => {
+  it("server error -> AIAnalysisError preserving the server code (P10.3B)", async () => {
     const original = globalThis.fetch;
     globalThis.fetch = (async () => new Response(
-      JSON.stringify({ ok: false, error: "AI провайдер вернул HTTP 429" }),
+      JSON.stringify({ ok: false, error: "AI-сервис временно недоступен", code: "provider_rate_limited" }),
       { status: 502 },
     )) as unknown as typeof fetch;
     try {
       const gw = new RemoteAIGateway();
-      await expect(gw.analyzeResume({} as ResumeAnalysisInput)).rejects.toThrow("HTTP 429");
+      await expect(gw.analyzeResume({} as ResumeAnalysisInput)).rejects.toBeInstanceOf(AIAnalysisError);
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+
+// ---------- P10.3B: transport preserves the machine-readable code ----------
+
+describe("RemoteAIGateway error contract (P10.3B)", () => {
+  async function captureError(status: number, body: unknown): Promise<unknown> {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(
+      typeof body === "string" ? body : JSON.stringify(body),
+      { status },
+    )) as unknown as typeof fetch;
+    try {
+      await new RemoteAIGateway().analyzeResume({} as ResumeAnalysisInput);
+      throw new Error("expected analyzeResume to reject");
+    } catch (error) {
+      return error;
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  it("502 + provider_rate_limited -> code preserved", async () => {
+    const error = await captureError(502, {
+      ok: false, error: "AI-сервис временно недоступен", code: "provider_rate_limited",
+    });
+    expect(error).toBeInstanceOf(AIAnalysisError);
+    expect((error as AIAnalysisError).code).toBe("provider_rate_limited");
+    expect((error as AIAnalysisError).message).toBe("AI-сервис временно недоступен");
+  });
+
+  it("503 + ai_not_configured -> code preserved", async () => {
+    const error = await captureError(503, {
+      ok: false, error: "AI-анализ не настроен", code: "ai_not_configured",
+    });
+    expect((error as AIAnalysisError).code).toBe("ai_not_configured");
+  });
+
+  it("502 + provider_unavailable -> code preserved", async () => {
+    const error = await captureError(502, {
+      ok: false, error: "AI-сервис недоступен", code: "provider_unavailable",
+    });
+    expect((error as AIAnalysisError).code).toBe("provider_unavailable");
+  });
+
+  it("413 + input_too_large -> code preserved", async () => {
+    const error = await captureError(413, {
+      ok: false, error: "Резюме слишком большое для анализа", code: "input_too_large",
+    });
+    expect((error as AIAnalysisError).code).toBe("input_too_large");
+  });
+
+  it("response without code -> AIAnalysisError with undefined code", async () => {
+    const error = await captureError(502, { ok: false, error: "что-то пошло не так" });
+    expect(error).toBeInstanceOf(AIAnalysisError);
+    expect((error as AIAnalysisError).code).toBeUndefined();
+  });
+
+  it("unrecognized code is not propagated as a known code", async () => {
+    const error = await captureError(502, { ok: false, error: "x", code: "totally_new_code" });
+    expect((error as AIAnalysisError).code).toBeUndefined();
+  });
+
+  it("failure without error text falls back to a safe generic message", async () => {
+    const error = await captureError(502, { ok: false, code: "provider_error" });
+    expect((error as AIAnalysisError).message).toBe("AI-сервис временно недоступен");
+    expect((error as AIAnalysisError).code).toBe("provider_error");
+  });
+});
+
+// ---------- P10.3B: orchestration surfaces the code in AnalysisOutcome ----------
+
+describe("analyzeCurrentVersion error codes (P10.3B)", () => {
+  function failingGateway(message: string, code?: AIErrorCode): AIGateway {
+    return stubGateway(async () => { throw new AIAnalysisError(message, code); });
+  }
+
+  const serverCodes: AIErrorCode[] = [
+    "ai_not_configured",
+    "input_too_large",
+    "invalid_input",
+    "invalid_body",
+    "provider_rate_limited",
+    "provider_error",
+    "provider_invalid_response",
+    "provider_unavailable",
+  ];
+
+  it.each(serverCodes)("code %s reaches AnalysisOutcome", async (code) => {
+    const record = makeRecord();
+    const outcome = await analyzeCurrentVersion(record, failingGateway("санитизированный текст", code));
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.code).toBe(code);
+    expect(outcome.error).toBe("санитизированный текст");
+  });
+
+  it("error without code -> safe generic fallback, no code", async () => {
+    const record = makeRecord();
+    const outcome = await analyzeCurrentVersion(record, failingGateway("что угодно"));
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.code).toBeUndefined();
+    expect(outcome.error).toBe("AI-сервис временно недоступен");
+  });
+
+  it("plain Error from a gateway -> generic fallback, technical text discarded", async () => {
+    const record = makeRecord();
+    const throwing = stubGateway(async () => { throw new Error("AI провайдер вернул HTTP 500 https://api.example/v1"); });
+
+    const outcome = await analyzeCurrentVersion(record, throwing);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.code).toBeUndefined();
+    expect(outcome.error).toBe("AI-сервис временно недоступен");
+    expect(outcome.error).not.toContain("HTTP 500");
+    expect(outcome.error).not.toContain("api.example");
+  });
+
+  it("nothing is persisted when the gateway fails with a server code", async () => {
+    const record = makeRecord();
+    const before = listAnalysesForResume(record.resume.id).length;
+
+    await analyzeCurrentVersion(record, failingGateway("AI-анализ не настроен", "ai_not_configured"));
+
+    expect(listAnalysesForResume(record.resume.id).length).toBe(before);
+  });
+
+  it("local orchestration failures stay code-free (not AI provider errors)", async () => {
+    const record = makeRecord();
+
+    // malformed AI result — локальная ошибка нормализации
+    const malformed = await analyzeCurrentVersion(record, stubGateway(async () => ({ wrong: true }) as never));
+    expect(malformed.ok).toBe(false);
+    if (malformed.ok) return;
+    expect(malformed.code).toBeUndefined();
+    expect(malformed.error).toContain("некорректный");
+
+    // отсутствует версия для анализа
+    const emptyRecord = { ...record, versions: [] } as typeof record;
+    const noVersion = await analyzeCurrentVersion(emptyRecord);
+    expect(noVersion.ok).toBe(false);
+    if (noVersion.ok) return;
+    expect(noVersion.code).toBeUndefined();
+    expect(noVersion.error).toBe("У резюме нет версии для анализа");
   });
 });

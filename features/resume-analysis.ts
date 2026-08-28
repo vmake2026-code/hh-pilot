@@ -22,9 +22,49 @@ import {
  * NEVER mutates the source ResumeVersion.
  */
 
+/**
+ * P10.3B: машинно-читаемые коды, которые возвращает server route
+ * /api/ai/analyze. Контракт зафиксирован в P10.3A — здесь он только
+ * распознаётся, новые коды не вводятся.
+ */
+export const AI_ERROR_CODES = [
+  "invalid_body",
+  "invalid_input",
+  "input_too_large",
+  "ai_not_configured",
+  "provider_rate_limited",
+  "provider_error",
+  "provider_invalid_response",
+  "provider_unavailable",
+] as const;
+
+export type AIErrorCode = (typeof AI_ERROR_CODES)[number];
+
+export function isAIErrorCode(value: unknown): value is AIErrorCode {
+  return typeof value === "string" && (AI_ERROR_CODES as readonly string[]).includes(value);
+}
+
+/** Безопасный текст, когда code отсутствует или неизвестен. */
+const GENERIC_AI_ERROR = "AI-сервис временно недоступен";
+
+/**
+ * P10.3B: транспортная ошибка, сохраняющая машинно-читаемый code.
+ * message — только санитизированный текст route boundary либо generic;
+ * технические детали провайдера сюда не попадают.
+ */
+export class AIAnalysisError extends Error {
+  readonly code?: AIErrorCode;
+
+  constructor(message: string, code?: AIErrorCode) {
+    super(message);
+    this.name = "AIAnalysisError";
+    this.code = code;
+  }
+}
+
 export type AnalysisOutcome =
   | { ok: true; analysis: ResumeAnalysis }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: AIErrorCode };
 
 /** AI input excludes salaryExpectation (privacy) — the key is fully absent. */
 function buildAnalysisInput(record: ResumeRecord, versionData: ResumeRecord["versions"][number]["data"]): ResumeAnalysisInput {
@@ -90,10 +130,13 @@ export class RemoteAIGateway implements AIGateway {
     });
     const payload = (await response.json()) as
       | { ok: true; analysis: ResumeAnalysis }
-      | { ok: false; error: string };
+      | { ok: false; error?: string; code?: string };
 
     if (!response.ok || !payload.ok) {
-      throw new Error(("error" in payload && payload.error) || "AI-сервис недоступен");
+      // P10.3B: code сохраняется, message остаётся санитизированным текстом route.
+      const code = "code" in payload && isAIErrorCode(payload.code) ? payload.code : undefined;
+      const message = ("error" in payload && payload.error) || GENERIC_AI_ERROR;
+      throw new AIAnalysisError(message, code);
     }
     return payload.analysis;
   }
@@ -143,8 +186,14 @@ export async function analyzeCurrentVersion(
   let raw: unknown;
   try {
     raw = await gateway.analyzeResume(input, { versionId: version.id });
-  } catch {
-    return { ok: false, error: "AI-сервис недоступен" };
+  } catch (error) {
+    // P10.3B: известный server code сохраняется вместе с его санитизированным
+    // текстом. Всё остальное (включая произвольные Error провайдера)
+    // сводится к generic-сообщению — технические детали наружу не идут.
+    if (error instanceof AIAnalysisError && error.code) {
+      return { ok: false, error: error.message || GENERIC_AI_ERROR, code: error.code };
+    }
+    return { ok: false, error: GENERIC_AI_ERROR };
   }
 
   const validated = normalizeAnalysis({
