@@ -259,6 +259,54 @@ describe("privacy lock (P10.1.2)", () => {
   });
 });
 
+// ---------- P12.5.x: AI analyze must use the CURRENT version, not an older one ----------
+
+describe("current version selection before AI analysis (P12.5.x)", () => {
+  it("record with v1+v2 (currentVersionId=v2) -> AI payload carries v2 data, not v1", async () => {
+    const record = makeRecord();
+
+    // v1 summary — маркируем уникальным значением до создания v2
+    record.versions[0].data.summary = confirmField("P12.5-V1-OLD");
+
+    // Пользовательское редактирование -> v2 становится current
+    createNewVersion(
+      {
+        firstName: "Иван", lastName: "Иванов", middleName: "", city: "Москва",
+        phone: "+79999999999", email: "test@example.com",
+        desiredPosition: "Frontend Developer", desiredSalary: "",
+        workFormat: "remote", employmentType: "full_time",
+        workExperience: record.versions[0].data.workExperience,
+        education: record.versions[0].data.education,
+        skills: record.versions[0].data.skills,
+        summary: "P12.5-V2-CURRENT", languages: [],
+      },
+      record,
+      confirmAll(),
+    );
+
+    const v2 = record.versions[record.versions.length - 1];
+    expect(record.resume.currentVersionId).toBe(v2.id); // предусловие сценария
+
+    const capturedBox: { value: unknown } = { value: null };
+    const g = captureGateway(capturedBox);
+
+    const outcome = await analyzeCurrentVersion(record, g);
+
+    expect(outcome.ok).toBe(true);
+    expect(capturedBox.value).not.toBeNull();
+    const payload = capturedBox.value as {
+      summary: { value?: string };
+      currentVersionId: string;
+    };
+    // 1. AI получил данные именно текущей версии v2
+    expect(payload.summary.value).toBe("P12.5-V2-CURRENT");
+    // 2. Данные старой версии v1 не протекли в payload
+    expect(JSON.stringify(capturedBox.value)).not.toContain("P12.5-V1-OLD");
+    // 3. Payload привязан к currentVersionId = v2
+    expect(payload.currentVersionId).toBe(v2.id);
+  });
+});
+
 // ---------- P10.2: RemoteAIGateway (client transport) ----------
 
 describe("RemoteAIGateway (P10.2)", () => {
