@@ -37,6 +37,7 @@ export default function VacancyCreatePage() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [source, setSource] = useState("text");
   const [errors, setErrors] = useState<VacancyErrors>({});
+  const [saveError, setSaveError] = useState("");
 
   const handleSave = useCallback(() => {
     const skillList = dedupeSkills(skillsText.split(",").map((s) => s.trim()).filter(Boolean));
@@ -88,14 +89,26 @@ export default function VacancyCreatePage() {
       fetchedAt: now,
     };
 
-    saveVacancy(vacancy);
-    router.push(`/vacancies/${id}`);
+    // P10.6 F1: persistence failure видима пользователю; navigation — только
+    // после успешного сохранения. Семантика saveVacancy не меняется.
+    try {
+      saveVacancy(vacancy);
+      router.push(`/vacancies/${id}`);
+    } catch {
+      setSaveError(
+        "Не удалось сохранить вакансию. Проверьте свободное место в браузере и попробуйте снова.",
+      );
+    }
   }, [title, company, location, workFormat, employmentType, salaryFrom, salaryTo, currency, description, requirementsText, responsibilitiesText, skillsText, sourceUrl, source, router]);
 
   return (
     <main className="page-wide">
       <div className="wizard-container">
         <h2>Добавить вакансию</h2>
+
+        {saveError && (
+          <p className="form-error" role="alert">{saveError}</p>
+        )}
 
         <div className="wizard-fields">
           <FormField

@@ -62,6 +62,7 @@ export default function WizardClient() {
   const [currentResumeId, setCurrentResumeId] = useState<string | null>(null);
   const [booted, setBooted] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   // Load draft or existing resume on mount
   useEffect(() => {
@@ -131,6 +132,7 @@ export default function WizardClient() {
       return;
     }
     setErrors({});
+    setSaveError("");
     if (step < TOTAL_STEPS) {
       setStep((step + 1) as WizardStep);
       window.scrollTo(0, 0);
@@ -153,19 +155,28 @@ export default function WizardClient() {
     const check = canFinalize(data, confirmedFields);
     if (!check.allowed) return;
 
-    if (editMode && currentResumeId) {
-      const existing = getResumeRecord(currentResumeId);
-      if (existing) {
-        createNewVersion(data, existing, confirmedFields);
-        draftStore.remove(draftKeyFor(currentResumeId));
-        router.push(`/resume/${currentResumeId}/preview`);
-        return;
+    // P10.6 F1: persistence errors (QuotaExceeded/SecurityError) обязаны быть
+    // видимыми пользователю, а не молча обрывать flow. Navigation — только
+    // после успешного сохранения; существующая семантика save* не меняется.
+    try {
+      if (editMode && currentResumeId) {
+        const existing = getResumeRecord(currentResumeId);
+        if (existing) {
+          createNewVersion(data, existing, confirmedFields);
+          draftStore.remove(draftKeyFor(currentResumeId));
+          router.push(`/resume/${currentResumeId}/preview`);
+          return;
+        }
       }
-    }
 
-    const { record } = finalizeResume(data, confirmedFields);
-    draftStore.remove(draftKeyFor(DRAFT_CONTEXT_NEW));
-    router.push(`/resume/${record.id}/preview`);
+      const { record } = finalizeResume(data, confirmedFields);
+      draftStore.remove(draftKeyFor(DRAFT_CONTEXT_NEW));
+      router.push(`/resume/${record.id}/preview`);
+    } catch {
+      setSaveError(
+        "Не удалось сохранить резюме. Проверьте свободное место в браузере и попробуйте снова — данные формы не потеряны.",
+      );
+    }
   }, [data, confirmedFields, router, editMode, currentResumeId]);
 
   // ---------- Work experience helpers ----------
@@ -287,6 +298,12 @@ export default function WizardClient() {
 
       {draftSaved && (
         <div className="wizard-toast">Черновик сохранён</div>
+      )}
+
+      {saveError && (
+        <div className="wizard-toast" role="alert" style={{ background: "#fee2e2", color: "#b91c1c" }}>
+          {saveError}
+        </div>
       )}
 
       {editMode && (

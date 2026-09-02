@@ -8,6 +8,38 @@ const LIST_KEY = "match-list";
 const store: PersistenceStore<MatchRecord> = createPersistenceStore<MatchRecord>();
 const listStore: PersistenceStore<string[]> = createPersistenceStore<string[]>();
 
+// P10.6 F2: persisted match snapshot может быть повреждён/устаревшей формы —
+// слепой cast ломал /matches и /matches/[matchId] render. Пропускаем только
+// записи с полями, которые реально рендерятся; повреждённые — null/пропуск.
+function isValidMatchRecord(value: unknown): value is MatchRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const m = value as Record<string, unknown>;
+  return (
+    typeof m.id === "string" &&
+    typeof m.vacancyId === "string" &&
+    typeof m.resumeId === "string" &&
+    typeof m.overallScore === "number" &&
+    Number.isFinite(m.overallScore) &&
+    typeof m.level === "string" &&
+    Array.isArray(m.matchedSkills) &&
+    Array.isArray(m.missingSkills) &&
+    Array.isArray(m.matchedRequirements) &&
+    Array.isArray(m.missingRequirements) &&
+    Array.isArray(m.risks) &&
+    Array.isArray(m.recommendations) &&
+    typeof m.vacancyTitle === "string" &&
+    typeof m.vacancyCompany === "string" &&
+    typeof m.resumeTitle === "string" &&
+    typeof m.resumeVersionNumber === "number" &&
+    typeof m.createdAt === "string"
+  );
+}
+
+function readMatchRecord(key: string): MatchRecord | null {
+  const raw = store.get(key);
+  return isValidMatchRecord(raw) ? raw : null;
+}
+
 function saveMatchRecord(record: MatchRecord): void {
   store.set(MATCH_PREFIX + record.id, record);
   const ids = listStore.get(LIST_KEY) ?? [];
@@ -17,13 +49,14 @@ function saveMatchRecord(record: MatchRecord): void {
 }
 
 function getMatchRecord(id: string): MatchRecord | null {
-  return store.get(MATCH_PREFIX + id);
+  return readMatchRecord(MATCH_PREFIX + id);
 }
 
 function listMatchRecords(): MatchRecord[] {
   const ids = listStore.get(LIST_KEY) ?? [];
+  // P10.6 F2: повреждённая запись не ломает историю сопоставлений целиком.
   return ids
-    .map((id) => store.get(MATCH_PREFIX + id))
+    .map((id) => readMatchRecord(MATCH_PREFIX + id))
     .filter((r): r is MatchRecord => r !== null);
 }
 

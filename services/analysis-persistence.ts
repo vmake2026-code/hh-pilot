@@ -8,6 +8,32 @@ const LIST_KEY = "analysis-list";
 const store: PersistenceStore<ResumeAnalysis> = createPersistenceStore<ResumeAnalysis>();
 const listStore: PersistenceStore<string[]> = createPersistenceStore<string[]>();
 
+// P10.6 F2: analysis records читаются слепым cast — повреждённая запись ломала
+// preview-страницу (overallScore/sections рендерятся сразу). Shape-guard по
+// критическим полям; повреждённые — null/пропуск, валидные — без изменений.
+function isValidAnalysis(value: unknown): value is ResumeAnalysis {
+  if (typeof value !== "object" || value === null) return false;
+  const a = value as Record<string, unknown>;
+  return (
+    typeof a.id === "string" &&
+    typeof a.resumeId === "string" &&
+    typeof a.versionId === "string" &&
+    typeof a.provider === "string" &&
+    typeof a.createdAt === "string" &&
+    typeof a.summary === "string" &&
+    typeof a.overallScore === "number" &&
+    Number.isFinite(a.overallScore) &&
+    Array.isArray(a.sections) &&
+    Array.isArray(a.strengths) &&
+    Array.isArray(a.weaknesses)
+  );
+}
+
+function readAnalysis(key: string): ResumeAnalysis | null {
+  const raw = store.get(key);
+  return isValidAnalysis(raw) ? raw : null;
+}
+
 function saveAnalysis(analysis: ResumeAnalysis): void {
   store.set(ANALYSIS_PREFIX + analysis.id, analysis);
   const ids = listStore.get(LIST_KEY) ?? [];
@@ -17,13 +43,14 @@ function saveAnalysis(analysis: ResumeAnalysis): void {
 }
 
 function getAnalysis(id: string): ResumeAnalysis | null {
-  return store.get(ANALYSIS_PREFIX + id);
+  return readAnalysis(ANALYSIS_PREFIX + id);
 }
 
 function listAnalyses(): ResumeAnalysis[] {
   const ids = listStore.get(LIST_KEY) ?? [];
+  // P10.6 F2: повреждённая analysis-запись не ломает список на preview.
   return ids
-    .map((id) => store.get(ANALYSIS_PREFIX + id))
+    .map((id) => readAnalysis(ANALYSIS_PREFIX + id))
     .filter((a): a is ResumeAnalysis => a !== null);
 }
 

@@ -35,6 +35,7 @@ export default function VacancyImportPage() {
   const [rawText, setRawText] = useState("");
   const [urlError, setUrlError] = useState("");
   const [saveErrors, setSaveErrors] = useState<VacancyErrors>({});
+  const [saveError, setSaveError] = useState("");
   const [draft, setDraft] = useState<VacancyImportDraft | null>(null);
 
   // Editable fields in preview
@@ -112,6 +113,7 @@ export default function VacancyImportPage() {
       return;
     }
     setSaveErrors({});
+    setSaveError("");
 
     const now = new Date().toISOString();
     const id = generateId();
@@ -148,8 +150,16 @@ export default function VacancyImportPage() {
       fetchedAt: now,
     };
 
-    saveVacancy(vacancy);
-    router.push(`/vacancies/${id}`);
+    // P10.6 F1: persistence failure видима; navigation — только после
+    // успешного сохранения. Семантика saveVacancy не меняется.
+    try {
+      saveVacancy(vacancy);
+      router.push(`/vacancies/${id}`);
+    } catch {
+      setSaveError(
+        "Не удалось сохранить вакансию. Проверьте свободное место в браузере и попробуйте снова.",
+      );
+    }
   }, [draft, title, company, location, workFormat, employmentType, salaryFrom, salaryTo, currency, description, skillsText, requirementsText, responsibilitiesText, router]);
 
   // ---------- INPUT step ----------
@@ -230,6 +240,10 @@ export default function VacancyImportPage() {
 
       <div className="wizard-container">
         <h2>Результат разбора</h2>
+
+        {saveError && (
+          <p className="form-error" role="alert">{saveError}</p>
+        )}
 
         {draft && draft.warnings.length > 0 && (
           <div className="import-warnings">

@@ -27,6 +27,7 @@ export default function MatchPage({
   const router = useRouter();
   const [selectedResumeId, setSelectedResumeId] = useState<string>("");
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
+  const [saveError, setSaveError] = useState("");
 
   const dataReady = vacancyResult.ready && recordsResult.ready;
   const vacancy: Vacancy | null = vacancyResult.data;
@@ -47,19 +48,27 @@ export default function MatchPage({
 
     if (!currentVersion) return;
 
-    const result = calculateMatch(vacancy, currentVersion, record.resume.id);
-    setMatchResult(result);
+    // P10.6 F1: расчёт и сохранение снимка — единая операция; persistence
+    // failure видима пользователю, navigation — только после успешного save.
+    try {
+      const result = calculateMatch(vacancy, currentVersion, record.resume.id);
+      setMatchResult(result);
 
-    // Persist as snapshot and redirect
-    const matchRecord = toMatchRecord(
-      result,
-      vacancy.title,
-      vacancy.company,
-      record.resume.title,
-      currentVersion.versionNumber,
-    );
-    saveMatchRecord(matchRecord);
-    router.push(`/matches/${matchRecord.id}`);
+      // Persist as snapshot and redirect
+      const matchRecord = toMatchRecord(
+        result,
+        vacancy.title,
+        vacancy.company,
+        record.resume.title,
+        currentVersion.versionNumber,
+      );
+      saveMatchRecord(matchRecord);
+      router.push(`/matches/${matchRecord.id}`);
+    } catch {
+      setSaveError(
+        "Не удалось сохранить результат сопоставления. Проверьте свободное место в браузере и попробуйте снова.",
+      );
+    }
   }, [vacancy, selectedResumeId, allRecords, router]);
 
   if (!dataReady) {
@@ -91,6 +100,10 @@ export default function MatchPage({
       <p className="wizard-hint">
         Вакансия: <strong>{vacancy.title}</strong> — {vacancy.company}
       </p>
+
+      {saveError && (
+        <p className="form-error" role="alert">{saveError}</p>
+      )}
 
       {!matchResult && (
         <div className="match-select">
