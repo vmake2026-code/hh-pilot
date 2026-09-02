@@ -1376,8 +1376,18 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   font-size: 13px;
   color: #6b7280;
+}
+
+/* P11.2C: actions (Открыть/Удалить) в footer карточки истории. */
+.match-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .match-history-resume {
