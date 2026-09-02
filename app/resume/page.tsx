@@ -1,14 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { listResumeRecords } from "@/services/resume-persistence";
+import { useCallback, useState } from "react";
+import { listResumeRecords, deleteResumeRecord } from "@/services/resume-persistence";
 import { useClientData } from "@/features/use-client-data";
 import { buildResumeListItems } from "@/features/resume-list";
 import Loading from "@/components/ui/loading";
 import type { ResumeRecord } from "@/types/resume";
 
 export default function ResumePage() {
-  const { data, ready } = useClientData(listResumeRecords);
+  const { data, ready, refresh } = useClientData(listResumeRecords);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+
+  // P11.2A: destructive action с confirmation. Один клик = максимум одна
+  // persistence-операция (deletingId блокирует повторный submit). Ошибка не
+  // скрывается: запись остаётся, показывается visible error + retry.
+  const handleDelete = useCallback(
+    (id: string, title: string) => {
+      if (deletingId) return;
+
+      const confirmed = window.confirm(
+        `Удалить резюме?\n\n«${title}» будет удалено.\nЭто действие нельзя отменить.`,
+      );
+      if (!confirmed) return;
+
+      setDeleteError("");
+      setDeletingId(id);
+      try {
+        deleteResumeRecord(id);
+        // UI обновляется только после успешного удаления.
+        refresh();
+      } catch {
+        setDeleteError(
+          "Не удалось удалить резюме. Проверьте настройки браузера и попробуйте снова.",
+        );
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [deletingId, refresh],
+  );
 
   if (!ready || data === null) {
     return <Loading />;
@@ -27,6 +59,10 @@ export default function ResumePage() {
           </Link>
         </div>
       </div>
+
+      {deleteError && (
+        <p className="form-error" role="alert">{deleteError}</p>
+      )}
 
       {items.length === 0 ? (
         <div className="empty-state">
@@ -60,6 +96,14 @@ export default function ResumePage() {
                 >
                   Просмотреть
                 </Link>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  onClick={() => handleDelete(item.id, item.title)}
+                  disabled={deletingId !== null}
+                >
+                  {deletingId === item.id ? "Удаляем…" : "Удалить"}
+                </button>
               </div>
             </div>
           ))}
