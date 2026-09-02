@@ -1,14 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { listVacancies } from "@/services/vacancy-persistence";
+import { useCallback, useState } from "react";
+import { listVacancies, deleteVacancy } from "@/services/vacancy-persistence";
 import { useClientData } from "@/features/use-client-data";
 import Loading from "@/components/ui/loading";
 import { WORK_FORMAT_LABELS } from "@/types/candidate";
 import type { Vacancy } from "@/types/vacancy";
 
 export default function VacanciesPage() {
-  const { data, ready } = useClientData(listVacancies);
+  const { data, ready, refresh } = useClientData(listVacancies);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+
+  // P11.2B: destructive action с confirmation (P11.2A pattern). Один клик =
+  // максимум одна persistence-операция (deletingId блокирует повторный submit).
+  // Ошибка не скрывается: вакансия остаётся, показывается visible error + retry.
+  const handleDelete = useCallback(
+    (id: string, title: string) => {
+      if (deletingId) return;
+
+      const confirmed = window.confirm(
+        `Удалить вакансию?\n\n«${title}» будет удалена.\nЭто действие нельзя отменить.`,
+      );
+      if (!confirmed) return;
+
+      setDeleteError("");
+      setDeletingId(id);
+      try {
+        deleteVacancy(id);
+        // UI обновляется только после успешного удаления.
+        refresh();
+      } catch {
+        setDeleteError(
+          "Не удалось удалить вакансию. Проверьте настройки браузера и попробуйте снова.",
+        );
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [deletingId, refresh],
+  );
 
   if (!ready || data === null) {
     return <Loading />;
@@ -30,6 +62,10 @@ export default function VacanciesPage() {
         </div>
       </div>
 
+      {deleteError && (
+        <p className="form-error" role="alert">{deleteError}</p>
+      )}
+
       {vacancies.length === 0 ? (
         <div className="empty-state">
           <p>У вас пока нет вакансий.</p>
@@ -41,11 +77,7 @@ export default function VacanciesPage() {
       ) : (
         <div className="vacancy-list">
           {vacancies.map((v) => (
-            <Link
-              key={v.id}
-              href={`/vacancies/${v.id}`}
-              className="vacancy-card"
-            >
+            <div key={v.id} className="vacancy-card">
               <div className="vacancy-card-main">
                 <h3 className="vacancy-card-title">{v.title}</h3>
                 <p className="vacancy-card-company">{v.company}</p>
@@ -56,8 +88,22 @@ export default function VacanciesPage() {
                   <span>{WORK_FORMAT_LABELS[v.workFormat] ?? v.workFormat}</span>
                 )}
                 {v.salary && <span>{v.salary}</span>}
+                <Link
+                  href={`/vacancies/${v.id}`}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Открыть
+                </Link>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  onClick={() => handleDelete(v.id, v.title)}
+                  disabled={deletingId !== null}
+                >
+                  {deletingId === v.id ? "Удаляем…" : "Удалить"}
+                </button>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}
