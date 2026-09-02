@@ -40,6 +40,7 @@ const AI_ERROR_MESSAGES: Record<AIErrorCode, string> = {
   input_too_large: "Резюме слишком большое для анализа. Сократите описания опыта и попробуйте снова.",
   invalid_input: "Данные резюме не подходят для анализа. Проверьте, что текущая версия заполнена.",
   invalid_body: "Не удалось отправить резюме на анализ.",
+  rate_limited: "Слишком много запросов на анализ. Подождите немного и попробуйте снова.",
   provider_rate_limited: "AI-сервис перегружен. Попробуйте через минуту.",
   provider_unavailable: "AI-сервис временно недоступен. Попробуйте позже.",
   provider_error: "AI-сервис временно не смог обработать запрос. Попробуйте позже.",
@@ -56,6 +57,8 @@ const AI_ERROR_RETRYABLE: Record<AIErrorCode, boolean> = {
   invalid_input: false,
   // Тело запроса формируется клиентом детерминированно — повтор не поможет.
   invalid_body: false,
+  // P10.5: окно rate limit временное — повтор осмыслен после Retry-After.
+  rate_limited: true,
   provider_rate_limited: true,
   provider_unavailable: true,
   provider_error: true,

@@ -364,6 +364,14 @@ describe("RemoteAIGateway error contract (P10.3B)", () => {
     expect((error as AIAnalysisError).code).toBe("input_too_large");
   });
 
+  it("429 + rate_limited -> code preserved (P10.5)", async () => {
+    const error = await captureError(429, {
+      ok: false, error: "Слишком много запросов на анализ. Попробуйте позже.", code: "rate_limited",
+    });
+    expect(error).toBeInstanceOf(AIAnalysisError);
+    expect((error as AIAnalysisError).code).toBe("rate_limited");
+  });
+
   it("response without code -> AIAnalysisError with undefined code", async () => {
     const error = await captureError(502, { ok: false, error: "что-то пошло не так" });
     expect(error).toBeInstanceOf(AIAnalysisError);
@@ -394,6 +402,8 @@ describe("analyzeCurrentVersion error codes (P10.3B)", () => {
     "input_too_large",
     "invalid_input",
     "invalid_body",
+    // P10.5: новый server code rate limit — контракт расширен, не заменён.
+    "rate_limited",
     "provider_rate_limited",
     "provider_error",
     "provider_invalid_response",

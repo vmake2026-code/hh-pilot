@@ -32,6 +32,7 @@ export const AI_ERROR_CODES = [
   "invalid_input",
   "input_too_large",
   "ai_not_configured",
+  "rate_limited",
   "provider_rate_limited",
   "provider_error",
   "provider_invalid_response",

@@ -6,6 +6,12 @@ import {
   OpenAICompatibleProvider,
   readOpenAICompatibleConfigFromEnv,
 } from "@/services/ai-providers/server/openai-compatible";
+import {
+  consumeRateLimit,
+  tryAcquireConcurrency,
+  releaseConcurrency,
+  extractClientIp,
+} from "@/lib/rate-limit";
 
 // SERVER-ONLY route: AI_API_KEY читается здесь и никогда не покидает сервер.
 
@@ -79,6 +85,24 @@ export async function POST(request: Request) {
     provider = new MockProvider();
   }
 
+  // P10.5: rate limit ПОСЛЕ configuration check — ошибки validation/configuration
+  // quota не расходуют; расходы начинаются только перед реальной AI операцией.
+  const rateLimit = consumeRateLimit(extractClientIp(request.headers));
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, error: "Слишком много запросов на анализ. Попробуйте позже.", code: "rate_limited" },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+    );
+  }
+
+  const concurrency = tryAcquireConcurrency();
+  if (!concurrency.allowed) {
+    return NextResponse.json(
+      { ok: false, error: "Слишком много запросов на анализ. Попробуйте позже.", code: "rate_limited" },
+      { status: 429, headers: { "Retry-After": String(concurrency.retryAfterSeconds) } },
+    );
+  }
+
   const analysisInput = input as ResumeAnalysisInput;
   const gateway = new MockAIGateway(provider);
 
@@ -91,6 +115,9 @@ export async function POST(request: Request) {
     console.error("[ai] provider error", error);
     const sanitized = classifyProviderError(error);
     return NextResponse.json({ ok: false, ...sanitized }, { status: 502 });
+  } finally {
+    // Release обязателен при success / provider error / exception / timeout.
+    releaseConcurrency();
   }
 }
 
