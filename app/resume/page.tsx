@@ -67,7 +67,7 @@ export default function ResumePage() {
       {items.length === 0 ? (
         <div className="empty-state">
           <p>У вас пока нет резюме.</p>
-          <p>Создайте резюме с нуля за 8 шагов или импортируйте существующее.</p>
+          <p>Создайте резюме с нуля за 8 шагов — с проверкой фактов и версиями.</p>
           <Link href="/resume/create" className="btn btn-primary btn-md">
             Создать с нуля
           </Link>

@@ -165,7 +165,7 @@ export default function ResumePreviewPage({
           >
             Редактировать
           </Link>
-          <Link href="/vacancy" className="btn btn-ghost btn-sm">
+          <Link href="/vacancies" className="btn btn-ghost btn-sm">
             Найти подходящие вакансии
           </Link>
         </div>

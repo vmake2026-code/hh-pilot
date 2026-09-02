@@ -35,6 +35,8 @@ body {
 .nav {
   display: flex;
   align-items: center;
+  /* P11.4: на узких экранах ссылки навигации переносятся, а не переполняют экран. */
+  flex-wrap: wrap;
   gap: 24px;
   padding: 12px 24px;
   background: #172033;
@@ -991,6 +993,8 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* P11.4: заголовок и actions переносятся на узких экранах вместо overflow. */
+  flex-wrap: wrap;
   margin-bottom: 24px;
 }
 
@@ -1432,6 +1436,8 @@ h1 {
 
 .page-header-actions {
   display: flex;
+  /* P11.4: несколько actions кнопок переносятся, а не обрезаются. */
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
