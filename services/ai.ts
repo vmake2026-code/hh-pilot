@@ -58,10 +58,11 @@ class MockAIGateway implements AIGateway {
     // P10.2: provider path — the gateway builds the prompt and delegates
     // text generation to the configured provider, then parses/normalizes.
     const { systemPrompt, userPrompt } = buildAnalysisPrompt(resume);
+    // P12.4: sampling parameters (temperature) не передаются: для Gemini 3.x
+    // официальная документация рекомендует их не задавать.
     const completion = await this.provider.complete({
       prompt: userPrompt,
       systemPrompt,
-      temperature: 0.2,
     });
 
     const extracted = extractJson(completion.content);

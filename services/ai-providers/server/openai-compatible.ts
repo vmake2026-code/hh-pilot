@@ -58,6 +58,18 @@ export class OpenAICompatibleProvider implements AIGatewayProvider {
   constructor(private readonly config: OpenAICompatibleConfig) {}
 
   async complete(request: AICompletionRequest): Promise<AICompletionResponse> {
+    // P12.4: sampling-параметры (temperature/top_p/top_k) не отправляются —
+    // для Gemini 3.x Google рекомендует их опускать. max_tokens — валидный
+    // OpenAI-compat параметр (маппится в maxOutputTokens), оставлен.
+    const body = JSON.stringify({
+      model: this.config.model,
+      max_tokens: request.maxTokens ?? 2000,
+      messages: [
+        ...(request.systemPrompt ? [{ role: "system", content: request.systemPrompt }] : []),
+        { role: "user", content: request.userPrompt ?? request.prompt },
+      ],
+    });
+
     const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -65,20 +77,23 @@ export class OpenAICompatibleProvider implements AIGatewayProvider {
         // Secret живёт только в этом server-side заголовке.
         Authorization: `Bearer ${this.config.apiKey}`,
       },
-      body: JSON.stringify({
-        model: this.config.model,
-        temperature: request.temperature ?? 0.2,
-        max_tokens: request.maxTokens ?? 2000,
-        messages: [
-          ...(request.systemPrompt ? [{ role: "system", content: request.systemPrompt }] : []),
-          { role: "user", content: request.userPrompt ?? request.prompt },
-        ],
-      }),
+      body,
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
     if (!response.ok) {
-      throw new Error(`AI провайдер вернул HTTP ${response.status}`);
+      // P12.4: тело upstream-ошибки включается в thrown Error — полная
+      // причина попадает в server log (route.ts console.error). Тело —
+      // ответ провайдера, ключ сюда не входит.
+      let upstreamDetail = "";
+      try {
+        upstreamDetail = (await response.text()).slice(0, 500);
+      } catch {
+        // тело недоступно — остаётся только статус
+      }
+      throw new Error(
+        `AI провайдер вернул HTTP ${response.status}${upstreamDetail ? `: ${upstreamDetail}` : ""}`,
+      );
     }
 
     const payload = (await response.json()) as {
