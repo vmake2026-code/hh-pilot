@@ -53,9 +53,9 @@ function normalizeText(input: string): string {
 // ---------- Section detection ----------
 
 const SECTION_KEYWORDS: Record<string, string[]> = {
-  requirements: ["требования", "ожидания", "нужно знать", "навыки", "what you need", "requirements", "квалификация"],
+  requirements: ["требования", "ожидания", "нужно знать", "навыки", "what you need", "requirements", "квалификация", "будет преимуществом"],
   responsibilities: ["обязанности", "задачи", "чем будете заниматься", "responsibilities", "что нужно делать", "описание работы"],
-  benefits: ["преимущества", "плюсы", "мы предлагаем", "benefits", "что предлагаем"],
+  benefits: ["преимущества", "плюсы", "мы предлагаем", "benefits", "что предлагаем", "условия", "что мы предлагаем"],
 };
 
 function detectSections(text: string): { start: number; key: string }[] {
@@ -237,7 +237,7 @@ function normalizeNumber(raw: string): string {
 function extractWorkFormat(text: string): string {
   const lower = text.toLowerCase();
   if (/\bremote\b|удалённ|удаленн/.test(lower)) return "remote";
-  if (/\boffice\b|в\s+офисе/.test(lower)) return "office";
+  if (/\boffice\b|в\s+офисе|на\s+месте\s+работодателя/.test(lower)) return "office";
   if (/\bhybrid\b|гибрид/.test(lower)) return "hybrid";
   return "";
 }
@@ -367,25 +367,46 @@ function parseVacancyImport(input: ParseInput): VacancyImportDraft {
   const title = extractTitle(trimmedText, sections);
   const company = extractCompany(trimmedText);
   const location = extractLocation(trimmedText);
-  const { salaryFrom, salaryTo, currency } = extractSalary(trimmedText);
-  const workFormat = extractWorkFormat(trimmedText);
+
+  // P19-HH-1/2: salary — context-aware. HH import формирует structured
+  // preamble "Зарплата: …". При её наличии salary парсится ТОЛЬКО из неё
+  // (guard-слова тоже применяются только к ней — description не может
+  // уничтожить реальную зарплату). Без явной salary-строки — НЕ сканируем
+  // description произвольными числовыми паттернами (иначе "до 18:00"
+  // из графика или "Java 21–25" из стека становятся фейковой зарплатой).
+  const salaryLine = trimmedText.match(/^Зарплата:\s*(.+)$/m)?.[1] ?? null;
+  let salaryFrom = "";
+  let salaryTo = "";
+  let currency = "₽";
+  if (salaryLine) {
+    ({ salaryFrom, salaryTo, currency } = extractSalary(salaryLine));
+  }
+
+  // P19-HH-3: workFormat — при явной строке "Формат работы: …" (HH import
+  // preamble) парсим только её: негативные формулировки в description
+  // ("удалёнка не предусмотрена") не могут перебить structured evidence.
+  // Без preamble — существующий full-text fallback.
+  const workFormatLine = trimmedText.match(/^Формат работы:\s*(.+)$/m)?.[1] ?? null;
+  const workFormat = workFormatLine
+    ? extractWorkFormat(workFormatLine)
+    : extractWorkFormat(trimmedText);
+
   const employmentType = extractEmploymentType(trimmedText);
   const skills = extractSkills(trimmedText);
 
-  // Extract requirements section
-  let requirements: string[] = [];
-  const reqSection = sections.find((s) => s.key === "requirements");
-  if (reqSection) {
-    const sectionText = extractSection(trimmedText, reqSection.start, sections);
-    requirements = extractListFromSection(sectionText);
+  // Extract requirements sections (P19-HH-4: HH может использовать несколько
+  // requirements-заголовков — «Требования» + «Будет преимуществом»; merge all)
+  const requirements: string[] = [];
+  for (const section of sections.filter((s) => s.key === "requirements")) {
+    const sectionText = extractSection(trimmedText, section.start, sections);
+    requirements.push(...extractListFromSection(sectionText));
   }
 
-  // Extract responsibilities section
-  let responsibilities: string[] = [];
-  const respSection = sections.find((s) => s.key === "responsibilities");
-  if (respSection) {
-    const sectionText = extractSection(trimmedText, respSection.start, sections);
-    responsibilities = extractListFromSection(sectionText);
+  // Extract responsibilities sections (merge all, симметрично requirements)
+  const responsibilities: string[] = [];
+  for (const section of sections.filter((s) => s.key === "responsibilities")) {
+    const sectionText = extractSection(trimmedText, section.start, sections);
+    responsibilities.push(...extractListFromSection(sectionText));
   }
 
   // Build description from all text if no sections found

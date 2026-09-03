@@ -854,3 +854,196 @@ describe("parseSalaryValue", () => {
     expect(parseSalaryValue("150000.50")).toBe(150000.5);
   });
 });
+
+// ---------- P19-FIX: HH import parser hardening ----------
+// Regression tests по live-аудиту 59 реальных HH вакансий (P19).
+
+describe("P19-HH-1: salary guard scoped to explicit salary line", () => {
+  it("guard word in description cannot destroy real salary (136482942)", () => {
+    // Live case: HH «до 80000 ₽», в description «по договоренности»
+    const text = [
+      "Оператор call-центра",
+      "Компания: Ростелеком",
+      "Зарплата: до 80000 ₽ за месяц",
+      "Локация: Тюмень",
+      "",
+      "Условия:",
+      "Порядок взаимодействия – по договоренности, возможность совмещать.",
+    ].join("\n");
+    const draft = parseVacancyImport({ source: "url", sourceUrl: "https://hh.ru/vacancy/136482942", text });
+    expect(draft.extractedFields.salaryTo.value).toBe("80000");
+    expect(draft.extractedFields.salaryFrom.value).toBe(null);
+  });
+
+  it("'competitive' in English description cannot destroy real salary (135952119)", () => {
+    const text = [
+      "English teacher for kids",
+      "Компания: Sun School",
+      "Зарплата: от 60000 до 60000 ₽",
+      "",
+      "Условия:",
+      "We offer competitive salaries in accordance with industry standards.",
+    ].join("\n");
+    const draft = parseVacancyImport({ source: "url", sourceUrl: "https://hh.ru/vacancy/135952119", text });
+    expect(draft.extractedFields.salaryFrom.value).toBe("60000");
+    expect(draft.extractedFields.salaryTo.value).toBe("60000");
+  });
+
+  it("guard word IN the salary line itself still blocks it", () => {
+    const text = "Dev\nКомпания: Т\nЗарплата: по договорённости\n\nУсловия:\nДМС";
+    const draft = parseVacancyImport({ source: "text", text });
+    expect(draft.extractedFields.salaryFrom.value).toBe(null);
+    expect(draft.extractedFields.salaryTo.value).toBe(null);
+  });
+
+  it("text-only import: salary without preamble still parsed (backward compat)", () => {
+    // Существующий behavior: ручной текст без «Зарплата:» — salary из текста
+    const text = "Frontend Developer\n\nКомпания: ООО Ромашка\nЗарплата: 180000–250000 ₽";
+    const draft = parseVacancyImport({ source: "text", text });
+    expect(draft.extractedFields.salaryFrom.value).toBe("180000");
+    expect(draft.extractedFields.salaryTo.value).toBe("250000");
+  });
+});
+
+describe("P19-HH-2: no fake salary from arbitrary numbers", () => {
+  it("'до 18:00' from work schedule is NOT salary (132320030)", () => {
+    const text = [
+      "Разработчик .Net",
+      "Компания: Банк ПСБ",
+      "Локация: Москва",
+      "",
+      "Условия:",
+      "График работы: 5/2 (пн-чт с 09:00 до 18:00, пт до 16:45)",
+      "Конкурентный уровень дохода",
+    ].join("\n");
+    const draft = parseVacancyImport({ source: "url", sourceUrl: "https://hh.ru/vacancy/132320030", text });
+    expect(draft.extractedFields.salaryFrom.value).toBe(null);
+    expect(draft.extractedFields.salaryTo.value).toBe(null);
+  });
+
+  it("'Java 21–25' from tech stack is NOT salary (136873586)", () => {
+    const text = [
+      "Разработчик Java",
+      "Компания: БАНК УРАЛСИБ",
+      "",
+      "Наш стек",
+      "Java 21–25",
+      "Spring Framework",
+      "GitLab",
+    ].join("\n");
+    const draft = parseVacancyImport({ source: "url", sourceUrl: "https://hh.ru/vacancy/136873586", text });
+    expect(draft.extractedFields.salaryFrom.value).toBe(null);
+    expect(draft.extractedFields.salaryTo.value).toBe(null);
+  });
+
+  it("numeric ranges in description without salary preamble produce NO salary", () => {
+    const text = "QA\nКомпания: Т\n\nОплата сдельная: 500–1000 за смену, опыт от 45000 смен";
+    const draft = parseVacancyImport({ source: "text", text });
+    expect(draft.extractedFields.salaryFrom.value).toBe(null);
+    expect(draft.extractedFields.salaryTo.value).toBe(null);
+  });
+
+  it("guard-only salary line («не указана») yields no salary and no fake fallback", () => {
+    const text = "Dev\nКомпания: Т\nЗарплата: не указана\n\nГрафик: с 09:00 до 18:00";
+    const draft = parseVacancyImport({ source: "text", text });
+    expect(draft.extractedFields.salaryFrom.value).toBe(null);
+    expect(draft.extractedFields.salaryTo.value).toBe(null);
+  });
+});
+
+describe("P19-HH-3: explicit workFormat line wins over description wording", () => {
+  it("office preamble + 'удалёнка не предусмотрена' in description → office (136778215)", () => {
+    const text = [
+      "Ведущий программист 1С:ERP",
+      "Компания: UNIVersal",
+      "Зарплата: до 300000 ₽ за месяц",
+      "Локация: Балашиха",
+      "Полная занятость",
+      "Формат работы: на месте работодателя",
+      "",
+      "На время проекта удалёнка не предусмотрена. Если вы планируете работать удалённо — вакансия не для вас.",
+    ].join("\n");
+    const draft = parseVacancyImport({ source: "url", sourceUrl: "https://hh.ru/vacancy/136778215", text });
+    expect(draft.extractedFields.workFormat.value).toBe("office");
+  });
+
+  it("remote preamble + 'офисные встречи' in description → remote", () => {
+    const text = [
+      "Frontend Developer",
+      "Формат работы: удалённо",
+      "",
+      "Иногда возможны офисные встречи в Москве.",
+    ].join("\n");
+    const draft = parseVacancyImport({ source: "url", text });
+    expect(draft.extractedFields.workFormat.value).toBe("remote");
+  });
+
+  it("hybrid preamble line recognized", () => {
+    const text = "Аналитик\nФормат работы: гибрид\n\nРабота из офиса 2 дня в неделю.";
+    const draft = parseVacancyImport({ source: "url", text });
+    expect(draft.extractedFields.workFormat.value).toBe("hybrid");
+  });
+
+  it("NO preamble line → existing full-text fallback preserved", () => {
+    const text = "Dev\nКомпания: Т\n\nУдалённая работа. Оформление по ТК.";
+    const draft = parseVacancyImport({ source: "text", text });
+    expect(draft.extractedFields.workFormat.value).toBe("remote");
+  });
+
+  it("'на месте работодателя' preamble recognized as office (P19 live mapping)", () => {
+    const text = "Dev\nФормат работы: на месте работодателя\n\nРабота в производстве.";
+    const draft = parseVacancyImport({ source: "url", text });
+    expect(draft.extractedFields.workFormat.value).toBe("office");
+  });
+
+  it("unrecognized preamble value yields empty, not fake format", () => {
+    const text = "Dev\nФормат работы: разъездной характер\n\nРабота на выезде.";
+    const draft = parseVacancyImport({ source: "url", text });
+    expect(draft.extractedFields.workFormat.value).toBe(null);
+  });
+});
+
+describe("P19-HH-4: HH section header canonicalization", () => {
+  it("'Что предстоит делать' → responsibilities section", () => {
+    const sections = detectSections("Title\n\nОбязанности:\nРазработка\n\nТребования:\nReact");
+    expect(sections.length).toBe(2);
+    // Canonicalization происходит в hh-fetch.ts (extractVacancyText) —
+    // её effect-тесты живут в hh-fetch.test.ts. Здесь: SECTION_KEYWORDS
+    // распознаёт канонизированные ключи.
+    const draft = parseVacancyImport({
+      source: "text",
+      text: "Title\n\nОбязанности:\nРазработка\n\nТребования:\nReact",
+    });
+    expect(draft.extractedFields.responsibilities).toContain("Разработка");
+    expect(draft.extractedFields.requirements).toContain("React");
+  });
+
+  it("'условия' and 'будет преимуществом' recognized as section keywords", () => {
+    // P19-HH-4: SECTION_KEYWORDS расширен реальными HH-заголовками
+    const sections = detectSections("Title\n\nУсловия:\nДМС\n\nТребования:\nReact");
+    expect(sections.map((s) => s.key)).toContain("benefits");
+
+    const sections2 = detectSections("Title\n\nТребования:\nReact\n\nБудет преимуществом:\nОпыт в банке");
+    expect(sections2.map((s) => s.key)).toContain("requirements");
+    expect(sections2.filter((s) => s.key === "requirements").length).toBe(2);
+  });
+
+  it("'что мы предлагаем' recognized as benefits keyword", () => {
+    const sections = detectSections("Title\n\nЧто мы предлагаем:\nДМС");
+    expect(sections.map((s) => s.key)).toContain("benefits");
+  });
+
+  it("'Условия' benefits section limits requirements scope", () => {
+    const text = "Title\n\nУсловия:\nДМС\n\nТребования:\nReact";
+    const draft = parseVacancyImport({ source: "text", text });
+    expect(draft.extractedFields.requirements).toContain("React");
+    expect(draft.extractedFields.requirements).not.toContain("ДМС");
+  });
+
+  it("'Будет преимуществом' extends requirements", () => {
+    const text = "Title\n\nТребования:\nReact\n\nБудет преимуществом:\nОпыт в банке";
+    const draft = parseVacancyImport({ source: "text", text });
+    expect(draft.extractedFields.requirements).toContain("React");
+    expect(draft.extractedFields.requirements).toContain("Опыт в банке");
+  });
+});

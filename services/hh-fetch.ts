@@ -295,16 +295,24 @@ function firstMatch(html: string, names: string[]): string | null {
 
 /**
  * HH-заголовки секций → канонические ключи, которые понимает
- * существующий SECTION_KEYWORDS parser ("Требования:"/"Обязанности:").
- * Канонический вид — с двоеточием, отдельной строкой.
+ * существующий SECTION_KEYWORDS parser ("Требования:"/"Обязанности:"/
+ * "Условия:"). Канонический вид — с двоеточием, отдельной строкой.
+ * P19-HH-4: расшиено реальными заголовками из live-аудита 59 вакансий.
  */
 function normalizeHHSectionHeaders(text: string): string {
   return text
+    // responsibilities
     .replace(/^[ \t]*Чем предстоит заниматься[ \t]*$/gim, "Требования:")
-    .replace(/^[ \t]*Наши ожидания[ \t]*$/gim, "Требования:")
+    .replace(/^[ \t]*Что предстоит делать[ \t]*$/gim, "Обязанности:")
+    .replace(/^[ \t]*О роли[ \t]*$/gim, "Обязанности:")
     .replace(/^[ \t]*Что нужно делать[ \t]*$/gim, "Обязанности:")
     .replace(/^[ \t]*Обязанности[ \t]*$/gim, "Обязанности:")
-    .replace(/^[ \t]*Требования[ \t]*$/gim, "Требования:");
+    // requirements
+    .replace(/^[ \t]*Наши ожидания[ \t]*$/gim, "Требования:")
+    .replace(/^[ \t]*Будет преимуществом[ \t]*$/gim, "Требования:")
+    .replace(/^[ \t]*Требования[ \t]*$/gim, "Требования:")
+    // benefits / conditions
+    .replace(/^[ \t]*(?:Мы предлагаем|Что мы предлагаем|Условия(?: работы)?)[ \t]*$/gim, "Условия:");
 }
 
 /**
@@ -370,6 +378,16 @@ export function extractVacancyText(html: string): HHExtractResult {
   // текстовые ключи (Полная занятость, удалённо и т.д.).
   const employment = employmentRaw ?? undefined;
 
+  // P19-HH-5: HH-брендинг часто повторяет title первой строкой description.
+  // Убираем дубликат ТОЛЬКО при точном совпадении (case/whitespace-normalized).
+  let descriptionBody = descriptionText;
+  if (title) {
+    const firstLine = descriptionBody.split("\n")[0]?.trim() ?? "";
+    if (firstLine && firstLine.toLowerCase() === title.trim().toLowerCase()) {
+      descriptionBody = descriptionBody.slice(firstLine.length).replace(/^\s*\n+/, "");
+    }
+  }
+
   const preambleLines: string[] = [];
   if (title) preambleLines.push(title);
   if (company) preambleLines.push(`Компания: ${company}`);
@@ -379,7 +397,7 @@ export function extractVacancyText(html: string): HHExtractResult {
   if (employment) preambleLines.push(employment);
   if (workFormat) preambleLines.push(`Формат работы: ${workFormat}`);
 
-  const text = `${preambleLines.join("\n")}\n\n${descriptionText}`.trim();
+  const text = `${preambleLines.join("\n")}\n\n${descriptionBody}`.trim();
 
   return {
     text,

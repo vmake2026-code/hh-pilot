@@ -424,3 +424,86 @@ describe("extractVacancyText → parseVacancyImport integration", () => {
     expect(draft.extractedFields.requirements.length).toBeGreaterThan(0);
   });
 });
+
+// ---------- P19-FIX: canonicalization + title dedup ----------
+
+describe("P19-HH-4: normalizeHHSectionHeaders (via extractVacancyText)", () => {
+  /** Минимальный HTML c JobPosting LD и произвольным description-заголовком. */
+  function fixtureWithDescriptionHeader(header: string, items: string[] = ["ДМС и страховка"]): string {
+    const itemsHtml = items.map((i) => `<li>${i}</li>`).join("");
+    const desc = `<p>${header}</p><ul>${itemsHtml}</ul>`;
+    return `<!DOCTYPE html><html><head><meta name="description" content="Вакансия Dev в компании Т. Зарплата: не указана. Москва."></head><body>
+<h1 data-qa="vacancy-title">Dev</h1>
+<script type="application/ld+json">{"@type":"JobPosting","title":"Dev","description":"${desc}","hiringOrganization":{"name":"Т"},"jobLocation":{"address":{"addressLocality":"Москва"}}}</script>
+</body></html>`;
+  }
+
+  it("'Мы предлагаем' canonicalized to 'Условия:' (benefits)", () => {
+    const { text } = extractVacancyText(fixtureWithDescriptionHeader("Мы предлагаем"));
+    expect(text).toMatch(/^Условия:$/m);
+  });
+
+  it("'Что мы предлагаем' canonicalized to 'Условия:'", () => {
+    const { text } = extractVacancyText(fixtureWithDescriptionHeader("Что мы предлагаем"));
+    expect(text).toMatch(/^Условия:$/m);
+  });
+
+  it("'Условия работы' canonicalized to 'Условия:'", () => {
+    const { text } = extractVacancyText(fixtureWithDescriptionHeader("Условия работы"));
+    expect(text).toMatch(/^Условия:$/m);
+  });
+
+  it("'Что предстоит делать' canonicalized to 'Обязанности:'", () => {
+    const { text } = extractVacancyText(fixtureWithDescriptionHeader("Что предстоит делать"));
+    expect(text).toMatch(/^Обязанности:$/m);
+  });
+
+  it("'О роли' canonicalized to 'Обязанности:'", () => {
+    const { text } = extractVacancyText(fixtureWithDescriptionHeader("О роли"));
+    expect(text).toMatch(/^Обязанности:$/m);
+  });
+
+  it("'Будет преимуществом' canonicalized to 'Требования:'", () => {
+    const { text } = extractVacancyText(
+      fixtureWithDescriptionHeader("Будет преимуществом", ["Опыт от 3 лет"]),
+    );
+    expect(text).toMatch(/^Требования:$/m);
+  });
+
+  it("canonicalized headers produce requirements via existing parser", async () => {
+    const { parseVacancyImport } = await import("../../services/vacancy-import");
+    const { text } = extractVacancyText(
+      fixtureWithDescriptionHeader("Будет преимуществом", ["Опыт от 3 лет"]),
+    );
+    const draft = parseVacancyImport({ source: "url", text });
+    expect(draft.extractedFields.requirements).toContain("Опыт от 3 лет");
+  });
+});
+
+describe("P19-HH-5: exact title deduplication in description", () => {
+  function fixtureWithTitleRepeat(repeatTitle: string): string {
+    const desc = `<p>${repeatTitle}</p><p>Реальная первая строка описания вакансии.</p>`;
+    return `<!DOCTYPE html><html><head></head><body>
+<h1 data-qa="vacancy-title">Backend Developer</h1>
+<script type="application/ld+json">{"@type":"JobPosting","title":"Backend Developer","description":"${desc}","hiringOrganization":{"name":"ООО Ромашка"},"jobLocation":{"address":{"addressLocality":"Москва"}}}</script>
+</body></html>`;
+  }
+
+  it("removes first description line when it exactly equals title (case-insensitive)", () => {
+    const { text } = extractVacancyText(fixtureWithTitleRepeat("backend developer"));
+    expect(text).not.toMatch(/^backend developer$/m);
+    expect(text).toContain("Реальная первая строка описания вакансии.");
+    // title остаётся в structured preamble ровно один раз
+    expect(text.match(/^Backend Developer$/gm)?.length).toBe(1);
+  });
+
+  it("does NOT remove similar-but-different first lines (no fuzzy matching)", () => {
+    const { text } = extractVacancyText(fixtureWithTitleRepeat("Backend Developer (удалённо)"));
+    expect(text).toContain("Backend Developer (удалённо)");
+  });
+
+  it("no dedup when first line differs entirely", () => {
+    const { text } = extractVacancyText(fixtureWithTitleRepeat("Совершенно другой текст"));
+    expect(text).toContain("Совершенно другой текст");
+  });
+});
