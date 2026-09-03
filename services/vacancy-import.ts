@@ -331,7 +331,7 @@ function parseVacancyImport(input: ParseInput): VacancyImportDraft {
 
   if (source === "url" && !rawText.trim()) {
     warnings.push(
-      "Автоматическая загрузка страницы пока не подключена. Вставьте текст вакансии для разбора.",
+      "Не удалось получить текст вакансии по ссылке. Вставьте текст вакансии для разбора.",
     );
   }
 

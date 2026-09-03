@@ -34,6 +34,9 @@ export default function VacancyImportPage() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [rawText, setRawText] = useState("");
   const [urlError, setUrlError] = useState("");
+  const [importError, setImportError] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+  const [fetchedAt, setFetchedAt] = useState("");
   const [saveErrors, setSaveErrors] = useState<VacancyErrors>({});
   const [saveError, setSaveError] = useState("");
   const [draft, setDraft] = useState<VacancyImportDraft | null>(null);
@@ -52,22 +55,7 @@ export default function VacancyImportPage() {
   const [workFormat, setWorkFormat] = useState("");
   const [employmentType, setEmploymentType] = useState("");
 
-  const handleParse = useCallback(() => {
-    // Validate URL if provided
-    if (sourceUrl.trim() && !isValidImportUrl(sourceUrl)) {
-      setUrlError("Введите корректный URL (http:// или https://)");
-      return;
-    }
-    setUrlError("");
-    setSaveErrors({});
-
-    const source = sourceUrl.trim() ? "url" : "text";
-    const parsed = parseVacancyImport({
-      source,
-      sourceUrl: sourceUrl.trim(),
-      text: rawText,
-    });
-
+  const applyDraft = useCallback((parsed: VacancyImportDraft) => {
     setDraft(parsed);
 
     // Populate editable fields from draft
@@ -86,7 +74,71 @@ export default function VacancyImportPage() {
     setEmploymentType(f.employmentType.value ?? "");
 
     setStep("preview");
-  }, [sourceUrl, rawText]);
+  }, []);
+
+  // URL-only / URL+text: server-side HH fetch → extracted text (или
+  // ручной текст как override) → существующий text parser.
+  const handleUrlImport = useCallback(async () => {
+    if (isImporting) return;
+    setIsImporting(true);
+    setImportError("");
+    setUrlError("");
+
+    try {
+      const response = await fetch("/api/vacancies/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: sourceUrl.trim() }),
+      });
+      const payload = (await response.json()) as
+        | { ok: true; text: string; fetchedAt: string }
+        | { ok: false; error?: string; code?: string };
+
+      if (!payload.ok) {
+        setImportError(payload.error || "Не удалось загрузить вакансию с HH");
+        return;
+      }
+
+      // URL + text: ручной текст приоритетнее (пользователь мог
+      // поправить/сократить выписку), URL остаётся источником метаданных.
+      const textForParsing = rawText.trim() ? rawText : payload.text;
+      setFetchedAt(payload.fetchedAt);
+
+      const parsed = parseVacancyImport({
+        source: "url",
+        sourceUrl: sourceUrl.trim(),
+        text: textForParsing,
+      });
+      applyDraft(parsed);
+    } catch {
+      setImportError("Не удалось связаться с сервером. Проверьте соединение и попробуйте снова.");
+    } finally {
+      setIsImporting(false);
+    }
+  }, [sourceUrl, rawText, isImporting, applyDraft]);
+
+  // Text only: существующий локальный parser flow без изменений.
+  const handleTextParse = useCallback(() => {
+    const parsed = parseVacancyImport({ source: "text", text: rawText });
+    applyDraft(parsed);
+  }, [rawText, applyDraft]);
+
+  const handleParse = useCallback(() => {
+    // Validate URL if provided
+    if (sourceUrl.trim() && !isValidImportUrl(sourceUrl)) {
+      setUrlError("Введите корректный URL (http:// или https://)");
+      return;
+    }
+    setUrlError("");
+    setImportError("");
+    setSaveErrors({});
+
+    if (sourceUrl.trim()) {
+      void handleUrlImport();
+    } else {
+      handleTextParse();
+    }
+  }, [sourceUrl, rawText, handleUrlImport, handleTextParse]);
 
   const handleSave = useCallback(() => {
     if (!draft) return;
@@ -121,6 +173,10 @@ export default function VacancyImportPage() {
     const parsedSalaryFrom = parseSalaryValue(salaryFrom);
     const parsedSalaryTo = parseSalaryValue(salaryTo);
 
+    // URL import: fetchedAt — момент реального server-side fetch,
+    // а не момент сохранения черновика.
+    const finalFetchedAt = draft.source === "url" && fetchedAt ? fetchedAt : now;
+
     const vacancy = {
       id,
       title: sanitizeText(title),
@@ -147,7 +203,7 @@ export default function VacancyImportPage() {
       responsibilities: respList,
       source: draft.source === "url" ? "hh_url" as const : "text" as const,
       sourceUrl: draft.sourceUrl || undefined,
-      fetchedAt: now,
+      fetchedAt: finalFetchedAt,
     };
 
     // P10.6 F1: persistence failure видима; navigation — только после
@@ -160,7 +216,7 @@ export default function VacancyImportPage() {
         "Не удалось сохранить вакансию. Проверьте свободное место в браузере и попробуйте снова.",
       );
     }
-  }, [draft, title, company, location, workFormat, employmentType, salaryFrom, salaryTo, currency, description, skillsText, requirementsText, responsibilitiesText, router]);
+  }, [draft, title, company, location, workFormat, employmentType, salaryFrom, salaryTo, currency, description, skillsText, requirementsText, responsibilitiesText, router, fetchedAt]);
 
   // ---------- INPUT step ----------
   if (step === "input") {
@@ -175,8 +231,12 @@ export default function VacancyImportPage() {
         <div className="wizard-container">
           <h2>Импорт вакансии</h2>
           <p className="wizard-hint">
-            Вставьте URL или текст вакансии для автоматического разбора полей.
+            Вставьте URL публичной вакансии hh.ru или её текст для автоматического разбора полей.
           </p>
+
+          {importError && (
+            <p className="form-error" role="alert">{importError}</p>
+          )}
 
           <div className="wizard-fields">
             <FormField
@@ -214,9 +274,9 @@ export default function VacancyImportPage() {
                 type="button"
                 className="btn btn-primary btn-lg"
                 onClick={handleParse}
-                disabled={!rawText.trim()}
+                disabled={isImporting || (!sourceUrl.trim() && !rawText.trim())}
               >
-                Разобрать вакансию
+                {isImporting ? "Загружаем вакансию с HH…" : "Разобрать вакансию"}
               </button>
             </div>
           </div>

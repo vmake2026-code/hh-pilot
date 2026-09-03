@@ -546,7 +546,7 @@ Code review`;
 
   it("returns URL warning when no text", () => {
     const draft = parseVacancyImport({ source: "url", sourceUrl: "https://hh.ru/vacancy/123" });
-    expect(draft.warnings.some((w) => w.includes("Автоматическая загрузка"))).toBe(true);
+    expect(draft.warnings.some((w) => w.includes("Не удалось получить текст вакансии"))).toBe(true);
   });
 
   it("handles null text gracefully", () => {
