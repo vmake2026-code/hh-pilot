@@ -1,6 +1,7 @@
 import type { ResumeRecord } from "../types/resume";
 import type { PersistenceStore } from "../lib/persistence";
 import { createPersistenceStore } from "../lib/persistence";
+import { deleteAnalysesForResume } from "./analysis-persistence";
 
 const RECORD_PREFIX = "rr:";
 const LIST_KEY = "resume-list";
@@ -85,6 +86,27 @@ function deleteResumeRecord(id: string): void {
     LIST_KEY,
     ids.filter((i) => i !== id),
   );
+  // P14-F3: cascade — analyses of the deleted resume are orphans otherwise
+  // (unbounded growth + stale records parsed on every listAnalyses()). Only
+  // analyses bound to THIS resumeId are removed. Matches/history stay by
+  // design (P11.2C non-cascade semantics); wizard drafts are cleaned in the
+  // delete flow by the same key scheme used by the wizard (resume-draft:<id>).
+  deleteAnalysesForResume(id);
+  removeDraftFor(id);
+}
+
+// P14-F3: draft key scheme mirrors features/resume-wizard.ts ("resume-draft:<context>",
+// stored via the shared "rp:"-prefixed persistence). Importing the wizard
+// feature here would create a services->features dependency, so the key is
+// re-declared with a comment pointing at the single wizard source.
+const DRAFT_KEY_PREFIX = "resume-draft:";
+
+function removeDraftFor(resumeId: string): void {
+  try {
+    window.localStorage.removeItem("rp:" + DRAFT_KEY_PREFIX + resumeId);
+  } catch {
+    // remove is best-effort per the persistence contract (lib/persistence.ts)
+  }
 }
 
 export { saveResumeRecord, getResumeRecord, listResumeRecords, deleteResumeRecord };

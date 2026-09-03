@@ -2,6 +2,7 @@ import type { WorkExperience, Education, Skill, ResumeRecord, ResumeVersion } fr
 import type { Confident } from "../types/confirmation";
 import { confirmField, missingField } from "../types/confirmation";
 import { validateStep1, validateStep2, validateStep3, validateStep4, validateStep5 } from "../lib/validation";
+import type { PersistenceStore } from "../lib/persistence";
 import { generateId } from "../lib/ids";
 import { createResumeEngine } from "../services/resume";
 import { saveResumeRecord, getResumeRecord } from "../services/resume-persistence";
@@ -129,6 +130,54 @@ function normalizeDraft(raw: unknown): WizardDraftState | null {
     step,
     confirmedFields,
   };
+}
+
+// ---------- Wizard navigation contract (P14-F1) ----------
+
+/**
+ * Back is available on every step except the first. P13-H1: the previous
+ * gate `step > 1 && step < 7` left steps 7 (preview) and 8 (fact-check)
+ * without a back button while finalize/next stayed blocked on incomplete
+ * confirmations — a dead end directly contradicting the on-screen hint
+ * "Вернитесь к нужному шагу, чтобы исправить".
+ */
+function canGoBackFrom(step: WizardStep): boolean {
+  return step > 1;
+}
+
+/**
+ * Finalize (step 8) and the step-7 advance stay blocked while required
+ * confirmations are missing. Navigation backwards never bypasses them:
+ * canFinalize is independent of the current step.
+ */
+function canProceedFrom(
+  step: WizardStep,
+  allowed: boolean,
+): boolean {
+  if (step < 7) return true;
+  return allowed;
+}
+
+// ---------- Draft save contract (P14-F2) ----------
+
+/**
+ * P14-F2: draft write failures (QuotaExceededError, SecurityError) must be
+ * visible, not silent (P10.6 F1 semantics). Returns true only when the
+ * draft is actually persisted; the caller keeps its unsaved state untouched.
+ */
+function persistDraft(
+  draftStore: PersistenceStore<unknown>,
+  context: string,
+  data: WizardData,
+  step: number,
+  confirmedFields: Set<string>,
+): boolean {
+  try {
+    draftStore.set(draftKeyFor(context), createDraftState(data, step, confirmedFields));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------- Fact-check ----------
@@ -463,4 +512,7 @@ export {
   normalizeDraft,
   parseAchievements,
   achievementsToText,
+  canGoBackFrom,
+  canProceedFrom,
+  persistDraft,
 };

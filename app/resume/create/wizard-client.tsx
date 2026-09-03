@@ -16,10 +16,12 @@ import {
   loadForEdit,
   createNewVersion,
   draftKeyFor,
-  createDraftState,
   normalizeDraft,
   parseAchievements,
   achievementsToText,
+  canGoBackFrom,
+  canProceedFrom,
+  persistDraft,
   type WizardData,
   type WizardStep,
 } from "@/features/resume-wizard";
@@ -104,11 +106,17 @@ export default function WizardClient() {
   const draftContext =
     editMode && currentResumeId ? currentResumeId : DRAFT_CONTEXT_NEW;
 
+  // P14-F2: persistence errors (QuotaExceeded/SecurityError) are visible —
+  // draft is reported as saved only after a successful write (P10.6 F1).
   const saveDraft = useCallback(() => {
-    draftStore.set(
-      draftKeyFor(draftContext),
-      createDraftState(data, step, confirmedFields),
-    );
+    const saved = persistDraft(draftStore, draftContext, data, step, confirmedFields);
+    if (!saved) {
+      setSaveError(
+        "Не удалось сохранить черновик. Проверьте свободное место в браузере и попробуйте снова — данные формы не потеряны.",
+      );
+      return;
+    }
+    setSaveError("");
     setDraftSaved(true);
     setTimeout(() => setDraftSaved(false), 2000);
   }, [data, step, confirmedFields, draftContext]);
@@ -319,8 +327,8 @@ export default function WizardClient() {
         onBack={goBack}
         onNext={goNext}
         onSaveDraft={saveDraft}
-        canGoBack={step > 1 && step < 7}
-        canGoNext={step < 7 ? true : !isLastStepBlocking()}
+        canGoBack={canGoBackFrom(step)}
+        canGoNext={canProceedFrom(step, !isLastStepBlocking())}
         nextLabel={step === 6 ? "Перейти к просмотру →" : undefined}
         isLastStep={step === 8}
         onFinalize={handleFinalize}

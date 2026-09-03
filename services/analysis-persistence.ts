@@ -58,4 +58,29 @@ function listAnalysesForResume(resumeId: string): ResumeAnalysis[] {
   return listAnalyses().filter((a) => a.resumeId === resumeId);
 }
 
-export { saveAnalysis, getAnalysis, listAnalyses, listAnalysesForResume };
+/**
+ * P14-F3: cascade cleanup when a resume is deleted. Removes exactly the
+ * analyses bound to this resumeId — both the records and their list
+ * entries. Analyses of other resumes are untouched. Returns the ids of
+ * removed analyses so the caller can report or verify the cleanup.
+ */
+function deleteAnalysesForResume(resumeId: string): string[] {
+  const ids = listStore.get(LIST_KEY) ?? [];
+  const removed: string[] = [];
+  const keptIds: string[] = [];
+  for (const id of ids) {
+    const raw = store.get(ANALYSIS_PREFIX + id);
+    if (isValidAnalysis(raw) && raw.resumeId === resumeId) {
+      store.remove(ANALYSIS_PREFIX + id);
+      removed.push(id);
+    } else {
+      keptIds.push(id);
+    }
+  }
+  if (removed.length > 0) {
+    listStore.set(LIST_KEY, keptIds);
+  }
+  return removed;
+}
+
+export { saveAnalysis, getAnalysis, listAnalyses, listAnalysesForResume, deleteAnalysesForResume };

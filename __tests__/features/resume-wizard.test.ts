@@ -6,6 +6,9 @@ import {
   validateWizardStep,
   buildFactChecks,
   canFinalize,
+  canGoBackFrom,
+  canProceedFrom,
+  persistDraft,
   WIZARD_STEPS,
 } from "../../features/resume-wizard";
 
@@ -161,5 +164,94 @@ describe("canFinalize", () => {
     const result = canFinalize(filledData(), confirmed);
     expect(result.allowed).toBe(false);
     expect(result.blockingFields).toContain("Желаемая должность");
+  });
+});
+
+// ---------- P14-F1: wizard navigation contract ----------
+
+describe("wizard navigation contract (P14-F1)", () => {
+  it("step 1 -> no back (first step)", () => {
+    expect(canGoBackFrom(1)).toBe(false);
+  });
+
+  it("steps 2..8 -> back available (no dead end on preview/fact-check)", () => {
+    for (const step of [2, 3, 4, 5, 6, 7, 8] as const) {
+      expect(canGoBackFrom(step)).toBe(true);
+    }
+  });
+
+  it("finalize stays blocked on step 8 when confirmations incomplete", () => {
+    const data = createDefaultWizardData(); // nothing confirmed
+    const { allowed } = canFinalize(data, new Set());
+    expect(allowed).toBe(false);
+    expect(canProceedFrom(8, allowed)).toBe(false);
+  });
+
+  it("step 7 advance stays blocked when confirmations incomplete", () => {
+    const { allowed } = canFinalize(createDefaultWizardData(), new Set());
+    expect(canProceedFrom(7, allowed)).toBe(false);
+  });
+
+  it("having back does not bypass confirmations: allowed finalize stays allowed", () => {
+    const confirmed = new Set(["phone", "email", "desiredPosition"]);
+    const data = {
+      ...createDefaultWizardData(),
+      firstName: "Иван",
+      lastName: "Иванов",
+      city: "Москва",
+      phone: "+79001234567",
+      email: "ivan@test.com",
+      desiredPosition: "Dev",
+    };
+    const { allowed } = canFinalize(data, confirmed);
+    expect(allowed).toBe(true);
+    expect(canProceedFrom(8, allowed)).toBe(true);
+  });
+
+  it("steps 1..6 advance regardless of confirmations (step gating unchanged)", () => {
+    // Existing step validation (steps 1-5) governs advancement via goNext;
+    // the navigation gate itself must stay permissive before step 7.
+    expect(canProceedFrom(3, false)).toBe(true);
+    expect(canProceedFrom(6, false)).toBe(true);
+  });
+});
+
+// ---------- P14-F2: draft save failure is visible, not silent ----------
+
+describe("persistDraft write-failure contract (P14-F2)", () => {
+  function makeStore() {
+    // Minimal PersistenceStore fake: set throws QuotaExceededError.
+    return {
+      get(): null { return null; },
+      set(): void {
+        throw Object.assign(new Error("quota exceeded"), { name: "QuotaExceededError" });
+      },
+      remove(): void {},
+    };
+  }
+
+  function makeData() {
+    return {
+      ...createDefaultWizardData(),
+      firstName: "Иван",
+      phone: "+79001234567",
+    };
+  }
+
+  it("write failure -> returns false (draft NOT reported as saved)", () => {
+    const result = persistDraft(makeStore(), "new", makeData(), 3, new Set(["phone"]));
+    expect(result).toBe(false);
+  });
+
+  it("successful write -> returns true", () => {
+    const written: unknown[] = [];
+    const store = {
+      get(): null { return null; },
+      set(_key: string, value: unknown): void { written.push(value); },
+      remove(): void {},
+    };
+    const result = persistDraft(store, "new", makeData(), 3, new Set(["phone"]));
+    expect(result).toBe(true);
+    expect(written.length).toBe(1);
   });
 });
