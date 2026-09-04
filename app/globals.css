@@ -584,6 +584,18 @@ h1 {
   background: transparent;
 }
 
+/* P16-1: level-less skill error states (uses existing error palette) */
+.skill-level-error {
+  border: 1px solid #d92d20 !important;
+  border-radius: 4px;
+}
+
+.skill-level-error-text {
+  color: #d92d20;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .skill-remove {
   background: none;
   border: none;

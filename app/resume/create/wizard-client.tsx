@@ -266,6 +266,7 @@ export default function WizardClient() {
   }, []);
 
   // P9.2: change the level of exactly one skill, preserving order/other fields.
+  // P16-1: choosing a valid level clears that skill's validation error immediately.
   const updateSkillLevel = useCallback((name: string, level: string) => {
     const normalized = normalizeSkillLevel(level);
     setData((prev) => ({
@@ -276,7 +277,15 @@ export default function WizardClient() {
           : s,
       ),
     }));
-  }, []);
+    if (normalized) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        const index = data.skills.findIndex((s) => s.name === name);
+        if (index !== -1) delete next[`skills[${index}].level`];
+        return next;
+      });
+    }
+  }, [data.skills]);
 
   const stepTitle = WIZARD_STEPS[step - 1]?.title ?? "";
   const factChecks = buildFactChecks(data, confirmedFields);
@@ -703,11 +712,13 @@ export default function WizardClient() {
         </div>
         {data.skills.length > 0 && (
           <div className="skill-list">
-            {data.skills.map((skill) => (
+            {data.skills.map((skill, index) => (
               <span key={skill.name} className="skill-tag">
                 {skill.name}
                 <select
-                  className="form-input skill-level-select"
+                  className={`form-input skill-level-select ${
+                    errors[`skills[${index}].level`] ? "skill-level-error" : ""
+                  }`}
                   value={normalizeSkillLevel(skill.level) ?? ""}
                   onChange={(e) => updateSkillLevel(skill.name, e.target.value)}
                   aria-label={`Уровень: ${skill.name}`}
@@ -725,9 +736,19 @@ export default function WizardClient() {
                 >
                   ×
                 </button>
+                {errors[`skills[${index}].level`] && (
+                  <span className="skill-level-error-text" role="alert">
+                    {errors[`skills[${index}].level`]}
+                  </span>
+                )}
               </span>
             ))}
           </div>
+        )}
+        {Object.keys(errors).some((k) => k.startsWith("skills[")) && (
+          <p className="form-error">
+            У каждого навыка должен быть указан уровень — выберите его в списке рядом с навыком.
+          </p>
         )}
       </div>
     );

@@ -485,6 +485,21 @@ function createNewVersion(
   record.workFormat = data.workFormat;
   record.employmentType = data.employmentType;
 
+  // P16-2: candidateInfo must reflect the wizard data the user just confirmed —
+  // silently discarding contact edits was a data-consistency bug (verified in P16).
+  // Same canonical mapping as finalizeResume's candidateInfo block.
+  record.candidateInfo = {
+    firstName: data.firstName.trim(),
+    lastName: data.lastName.trim(),
+    middleName: data.middleName.trim(),
+    email: data.email.trim(),
+    phone: data.phone.trim(),
+    city: data.city.trim(),
+  };
+  // P16-3: keep the list/detail title in sync with the new version's desiredPosition
+  // (same source as finalizeResume; keep the old title if the position is somehow empty).
+  record.resume.title = data.desiredPosition.trim() || record.resume.title;
+
   saveResumeRecord(record);
 
   return version;
