@@ -1555,3 +1555,115 @@ h1 {
   font-size: 13px;
   color: #667085;
 }
+
+/* ---- P24: HH Wizard checklist ---- */
+
+.hh-wizard-progress {
+  margin-bottom: 24px;
+}
+
+.hh-wizard-progress-count {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.hh-wizard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hh-wizard-item {
+  background: white;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.hh-wizard-item-done {
+  border-color: #12b76a;
+  background: #f6fef9;
+}
+
+.hh-wizard-item-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.hh-wizard-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #eef2f6;
+  color: #172033;
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.hh-wizard-step-done {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #d1fadf;
+  color: #067647;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.hh-wizard-item-title {
+  margin: 0;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hh-wizard-done-badge {
+  font-size: 12px;
+}
+
+.hh-wizard-where {
+  font-size: 13px;
+  color: #667085;
+  margin: 0 0 12px;
+}
+
+.hh-wizard-copybox {
+  margin: 0 0 12px;
+  padding: 12px;
+  background: #f9fafb;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.hh-wizard-empty {
+  font-size: 14px;
+  color: #667085;
+  font-style: italic;
+  margin: 0 0 12px;
+}
+
+.hh-wizard-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

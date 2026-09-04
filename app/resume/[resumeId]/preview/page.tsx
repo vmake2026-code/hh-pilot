@@ -159,14 +159,21 @@ export default function ResumePreviewPage({
           ← К резюме
         </Link>
         <div className="preview-actions-right">
+          {/* P24: HH wizard entry point — copy-paste transfer to hh.ru */}
+          <Link
+            href={`/hh-wizard?resumeId=${resumeId}`}
+            className="btn btn-primary btn-sm"
+          >
+            Подготовить к отклику на hh.ru
+          </Link>
           <Link
             href={`/resume/create?resumeId=${resumeId}`}
             className="btn btn-secondary btn-sm"
           >
-            Редактировать
+            Редактировать резюме
           </Link>
           <Link href="/vacancies" className="btn btn-ghost btn-sm">
-            Найти подходящие вакансии
+            Подобрать вакансии
           </Link>
         </div>
       </div>
