@@ -4,10 +4,24 @@ import {
   extractVacancyText,
   HHFetchError,
 } from "@/services/hh-fetch";
+import { hhImportRateLimiter, extractClientIp } from "@/lib/rate-limit";
+import { isAllowedUrl } from "@/lib/security";
 
 // P18: server-side HH URL import. Повторная валидация URL, fetch с SSRF
 // hardening (timeout/size/redirect/content-type), extraction → текст
 // для существующего клиентского text parser. Никаких credentials HH.
+// P20: per-IP rate limit + concurrency cap на outbound HH fetch.
+
+function rateLimitedResponse(retryAfterSeconds: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "Слишком много запросов на импорт. Попробуйте позже.",
+      code: "rate_limited",
+    },
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
+  );
+}
 
 /** HTTP status по стабильному коду ошибки. */
 function statusForCode(code: string): number {
@@ -51,22 +65,50 @@ export async function POST(request: Request) {
     );
   }
 
+  // P20: allowlist-проверка ДО rate limit — невалидные URL не расходуют
+  // квоту (паттерн AI route: validation errors не тратят лимит).
+  // fetchHHVacancyPage перепроверит это ещё раз (defense in depth).
+  if (!isAllowedUrl(url)) {
+    return NextResponse.json(
+      { ok: false, error: "Ссылка должна вести на hh.ru (http/https)", code: "invalid_url" },
+      { status: 400 },
+    );
+  }
+
   const maxBytes = Number(process.env.HH_IMPORT_MAX_BYTES ?? "");
   try {
-    const { html, finalUrl } = await fetchHHVacancyPage(url, {
-      maxBytes: Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : undefined,
-    });
-    const { text, fields } = extractVacancyText(html);
+    // P20: rate limit ПОСЛЕ URL validation (invalid_body/invalid_url квоту
+    // не расходуют) и ДО outbound HH fetch — лимит защищает именно дорогую
+    // часть (паттерн /api/ai/analyze).
+    const rateLimit = hhImportRateLimiter.consumeRateLimit(extractClientIp(request.headers));
+    if (!rateLimit.allowed) {
+      return rateLimitedResponse(rateLimit.retryAfterSeconds);
+    }
 
-    // fetchedAt фиксирует момент реального server-side fetch.
-    return NextResponse.json({
-      ok: true,
-      text,
-      fields,
-      sourceUrl: url,
-      finalUrl,
-      fetchedAt: new Date().toISOString(),
-    });
+    const concurrency = hhImportRateLimiter.tryAcquireConcurrency();
+    if (!concurrency.allowed) {
+      return rateLimitedResponse(concurrency.retryAfterSeconds);
+    }
+
+    try {
+      const { html, finalUrl } = await fetchHHVacancyPage(url, {
+        maxBytes: Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : undefined,
+      });
+      const { text, fields } = extractVacancyText(html);
+
+      // fetchedAt фиксирует момент реального server-side fetch.
+      return NextResponse.json({
+        ok: true,
+        text,
+        fields,
+        sourceUrl: url,
+        finalUrl,
+        fetchedAt: new Date().toISOString(),
+      });
+    } finally {
+      // Release обязателен при success / fetch error / exception / timeout.
+      hhImportRateLimiter.releaseConcurrency();
+    }
   } catch (error) {
     if (error instanceof HHFetchError) {
       const status = statusForCode(error.code);

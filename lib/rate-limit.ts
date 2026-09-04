@@ -140,3 +140,135 @@ export function resetRateLimiterForTests(): void {
   buckets.clear();
   inFlight = 0;
 }
+
+// ---------- P20: scoped rate limiter (multiple routes) ----------
+//
+// Существующие AI-функции выше держат один общий buckets/inFlight state с
+// env-именами AI_*. Прямое переиспользование их для другого route (HH import)
+// невозможно: HH-импорты расходовали бы AI-квоту того же IP и наоборот.
+// Минимальная абстракция: factory с изолированным state и собственными
+// env-именами. Same fixed-window semantics, same IP trust boundary caveat.
+
+export interface ScopedRateLimiter {
+  consumeRateLimit(ip: string): RateLimitDecision;
+  tryAcquireConcurrency(): RateLimitDecision;
+  releaseConcurrency(): void;
+  /** Изоляция тестов: сброс state. Не использовать в runtime-коде. */
+  resetForTests(): void;
+}
+
+interface ScopedLimiterOptions {
+  envNames: {
+    windowMs: string;
+    maxPerWindow: string;
+    concurrencyMax?: string;
+    concurrencyRetryAfterS?: string;
+    ttlMs?: string;
+    maxBuckets?: string;
+  };
+  defaults: {
+    windowMs: number;
+    maxPerWindow: number;
+    concurrencyMax: number;
+    concurrencyRetryAfterS: number;
+    ttlMs: number;
+    maxBuckets: number;
+  };
+}
+
+function createScopedRateLimiter(options: ScopedLimiterOptions): ScopedRateLimiter {
+  const localBuckets = new Map<string, RateLimitBucket>();
+  let localInFlight = 0;
+
+  const readEnv = (name: string | undefined, fallback: number): number =>
+    name ? readPositiveIntEnv(name, fallback) : fallback;
+
+  const readWindowMs = () => readEnv(options.envNames.windowMs, options.defaults.windowMs);
+  const readMax = () => readEnv(options.envNames.maxPerWindow, options.defaults.maxPerWindow);
+  const readTtlMs = (windowMs: number) =>
+    Math.max(readEnv(options.envNames.ttlMs, options.defaults.ttlMs), 2 * windowMs);
+  const readMaxBuckets = () => readEnv(options.envNames.maxBuckets, options.defaults.maxBuckets);
+
+  const cleanup = (now: number, ttlMs: number): void => {
+    for (const [key, bucket] of localBuckets) {
+      if (now - bucket.windowStart > ttlMs) localBuckets.delete(key);
+    }
+  };
+
+  const evict = (): void => {
+    while (localBuckets.size >= readMaxBuckets()) {
+      const oldest = localBuckets.keys().next();
+      if (oldest.done || oldest.value === undefined) break;
+      localBuckets.delete(oldest.value);
+    }
+  };
+
+  return {
+    consumeRateLimit(ip: string): RateLimitDecision {
+      const now = Date.now();
+      const windowMs = readWindowMs();
+      cleanup(now, readTtlMs(windowMs));
+
+      const bucket = localBuckets.get(ip);
+      if (!bucket || now - bucket.windowStart >= windowMs) {
+        evict();
+        localBuckets.set(ip, { count: 1, windowStart: now });
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+      if (bucket.count < readMax()) {
+        bucket.count += 1;
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+      const remainingMs = windowMs - (now - bucket.windowStart);
+      return { allowed: false, retryAfterSeconds: Math.ceil(remainingMs / 1000) };
+    },
+
+    tryAcquireConcurrency(): RateLimitDecision {
+      if (localInFlight >= readEnv(options.envNames.concurrencyMax, options.defaults.concurrencyMax)) {
+        return {
+          allowed: false,
+          retryAfterSeconds: readEnv(
+            options.envNames.concurrencyRetryAfterS,
+            options.defaults.concurrencyRetryAfterS,
+          ),
+        };
+      }
+      localInFlight += 1;
+      return { allowed: true, retryAfterSeconds: 0 };
+    },
+
+    releaseConcurrency(): void {
+      if (localInFlight > 0) localInFlight -= 1;
+    },
+
+    resetForTests(): void {
+      localBuckets.clear();
+      localInFlight = 0;
+    },
+  };
+}
+
+/**
+ * P20: HH import limiter — per-IP fixed window + in-process concurrency cap
+ * на outbound HH fetch. Defaults консервативны: ручной UI-импорт — это
+ * единицы запросов в минуту; 10/min/IP режет bursts, concurrency 3
+ * ограничивает одновременные outbound HH requests на процесс.
+ */
+export const hhImportRateLimiter: ScopedRateLimiter = createScopedRateLimiter({
+  envNames: {
+    windowMs: "HH_IMPORT_RATE_LIMIT_WINDOW_MS",
+    maxPerWindow: "HH_IMPORT_RATE_LIMIT_MAX",
+    concurrencyMax: "HH_IMPORT_CONCURRENCY_MAX",
+    concurrencyRetryAfterS: "HH_IMPORT_CONCURRENCY_RETRY_AFTER_S",
+    ttlMs: "HH_IMPORT_RATE_LIMIT_TTL_MS",
+    maxBuckets: "HH_IMPORT_RATE_LIMIT_MAX_BUCKETS",
+  },
+  defaults: {
+    windowMs: 60_000,
+    maxPerWindow: 10,
+    concurrencyMax: 3,
+    concurrencyRetryAfterS: 5,
+    ttlMs: 10 * 60_000,
+    maxBuckets: 10_000,
+  },
+});

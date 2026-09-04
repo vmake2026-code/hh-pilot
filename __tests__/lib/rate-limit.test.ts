@@ -5,6 +5,7 @@ import {
   releaseConcurrency,
   extractClientIp,
   resetRateLimiterForTests,
+  hhImportRateLimiter,
 } from "../../lib/rate-limit";
 
 // P10.5: unit-контракт rate limiter — fixed window per IP + concurrency cap.
@@ -19,10 +20,21 @@ const RATE_ENV_KEYS = [
   "AI_CONCURRENCY_RETRY_AFTER_S",
 ] as const;
 
+// P20: HH import limiter env keys
+const HH_ENV_KEYS = [
+  "HH_IMPORT_RATE_LIMIT_WINDOW_MS",
+  "HH_IMPORT_RATE_LIMIT_MAX",
+  "HH_IMPORT_RATE_LIMIT_TTL_MS",
+  "HH_IMPORT_RATE_LIMIT_MAX_BUCKETS",
+  "HH_IMPORT_CONCURRENCY_MAX",
+  "HH_IMPORT_CONCURRENCY_RETRY_AFTER_S",
+] as const;
+
 let savedEnv: Record<string, string | undefined>;
 
 function clearEnv(): void {
   for (const key of RATE_ENV_KEYS) delete process.env[key];
+  for (const key of HH_ENV_KEYS) delete process.env[key];
 }
 
 function setEnv(key: string, value: string | undefined): void {
@@ -33,8 +45,10 @@ function setEnv(key: string, value: string | undefined): void {
 beforeEach(() => {
   savedEnv = {};
   for (const key of RATE_ENV_KEYS) savedEnv[key] = process.env[key];
+  for (const key of HH_ENV_KEYS) savedEnv[key] = process.env[key];
   clearEnv();
   resetRateLimiterForTests();
+  hhImportRateLimiter.resetForTests();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
 });
@@ -46,7 +60,12 @@ afterEach(() => {
     const value = savedEnv[key];
     setEnv(key, value);
   }
+  for (const key of HH_ENV_KEYS) {
+    const value = savedEnv[key];
+    setEnv(key, value);
+  }
   resetRateLimiterForTests();
+  hhImportRateLimiter.resetForTests();
 });
 
 describe("consumeRateLimit — basic fixed window (P10.5)", () => {
@@ -245,5 +264,90 @@ describe("concurrency cap (P10.5)", () => {
     const decision = tryAcquireConcurrency();
     expect(decision.allowed).toBe(false);
     expect(decision.retryAfterSeconds).toBe(5);
+  });
+});
+
+// ---------- P20: scoped HH import limiter ----------
+
+describe("hhImportRateLimiter — scoped fixed window (P20)", () => {
+  it("default: 10 requests per IP allowed, 11th blocked", () => {
+    for (let i = 0; i < 10; i++) {
+      expect(hhImportRateLimiter.consumeRateLimit("1.2.3.4").allowed).toBe(true);
+    }
+    const decision = hhImportRateLimiter.consumeRateLimit("1.2.3.4");
+    expect(decision.allowed).toBe(false);
+    expect(decision.retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  it("HH_IMPORT_RATE_LIMIT_MAX override works", () => {
+    process.env.HH_IMPORT_RATE_LIMIT_MAX = "2";
+    expect(hhImportRateLimiter.consumeRateLimit("5.5.5.5").allowed).toBe(true);
+    expect(hhImportRateLimiter.consumeRateLimit("5.5.5.5").allowed).toBe(true);
+    expect(hhImportRateLimiter.consumeRateLimit("5.5.5.5").allowed).toBe(false);
+  });
+
+  it("independent IP buckets", () => {
+    for (let i = 0; i < 10; i++) hhImportRateLimiter.consumeRateLimit("1.1.1.1");
+    expect(hhImportRateLimiter.consumeRateLimit("1.1.1.1").allowed).toBe(false);
+    expect(hhImportRateLimiter.consumeRateLimit("2.2.2.2").allowed).toBe(true);
+  });
+
+  it("window expiration via fake timers (no real sleep)", () => {
+    process.env.HH_IMPORT_RATE_LIMIT_MAX = "1";
+    expect(hhImportRateLimiter.consumeRateLimit("7.7.7.7").allowed).toBe(true);
+    expect(hhImportRateLimiter.consumeRateLimit("7.7.7.7").allowed).toBe(false);
+
+    vi.setSystemTime(new Date("2026-01-01T00:01:00Z")); // +60s, окно истекло
+    expect(hhImportRateLimiter.consumeRateLimit("7.7.7.7").allowed).toBe(true);
+  });
+
+  it("HH limiter state is ISOLATED from AI limiter (different buckets)", () => {
+    process.env.AI_RATE_LIMIT_MAX = "1";
+    process.env.HH_IMPORT_RATE_LIMIT_MAX = "1";
+
+    // исчерпываем AI-бакет IP
+    expect(consumeRateLimit("9.9.9.9").allowed).toBe(true);
+    expect(consumeRateLimit("9.9.9.9").allowed).toBe(false);
+    // HH-бакет того же IP независим
+    expect(hhImportRateLimiter.consumeRateLimit("9.9.9.9").allowed).toBe(true);
+    expect(hhImportRateLimiter.consumeRateLimit("9.9.9.9").allowed).toBe(false);
+    // AI-бакет по-прежнему блокирует
+    expect(consumeRateLimit("9.9.9.9").allowed).toBe(false);
+  });
+
+  it("concurrency: default 3 in-flight, release frees the slot", () => {
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+    const saturated = hhImportRateLimiter.tryAcquireConcurrency();
+    expect(saturated.allowed).toBe(false);
+    expect(saturated.retryAfterSeconds).toBe(5);
+
+    hhImportRateLimiter.releaseConcurrency();
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+  });
+
+  it("HH_IMPORT_CONCURRENCY_MAX override + underflow-safe release", () => {
+    process.env.HH_IMPORT_CONCURRENCY_MAX = "2";
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(false);
+    hhImportRateLimiter.releaseConcurrency();
+    hhImportRateLimiter.releaseConcurrency();
+    hhImportRateLimiter.releaseConcurrency(); // extra release — no underflow
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+  });
+
+  it("HH concurrency state is ISOLATED from AI concurrency counter", () => {
+    process.env.AI_CONCURRENCY_MAX = "1";
+    process.env.HH_IMPORT_CONCURRENCY_MAX = "1";
+
+    expect(tryAcquireConcurrency().allowed).toBe(true); // AI slot занят
+    expect(tryAcquireConcurrency().allowed).toBe(false); // AI saturated
+    // HH slots независимы
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(true);
+    expect(hhImportRateLimiter.tryAcquireConcurrency().allowed).toBe(false);
+    releaseConcurrency(); // AI освобождён
+    expect(tryAcquireConcurrency().allowed).toBe(true);
   });
 });

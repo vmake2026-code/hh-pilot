@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { POST } from "../../app/api/vacancies/import/route";
+import { hhImportRateLimiter } from "../../lib/rate-limit";
 import { FIXTURE_VACANCY_HTML } from "./hh-html-fixtures";
 
 // P18: контракт POST /api/vacancies/import — validation, error
 // normalization (никаких внутренних деталей наружу), success shape.
 // HTTP layer mocked — live hh.ru network не нужен.
+// P20: rate limiting/concurrency на route boundary (state сбрасывается
+// между тестами — лимиты не влияют на остальные кейсы).
 
 let savedFetch: typeof globalThis.fetch;
 
@@ -25,11 +28,13 @@ function hhResponse(body: string, headers: Record<string, string> = {}, status =
 
 beforeEach(() => {
   savedFetch = globalThis.fetch;
+  hhImportRateLimiter.resetForTests();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
   globalThis.fetch = savedFetch;
+  hhImportRateLimiter.resetForTests();
   vi.restoreAllMocks();
 });
 
@@ -220,3 +225,254 @@ describe("POST /api/vacancies/import — error normalization", () => {
     expect(raw).not.toContain("internal/path.js");
   });
 });
+
+// ---------- P20: rate limiting / concurrency on the route boundary ----------
+
+describe("POST /api/vacancies/import — rate limiting (P20)", () => {
+  function setFetchOk(): void {
+    globalThis.fetch = (async () => hhResponse(FIXTURE_VACANCY_HTML)) as unknown as typeof fetch;
+  }
+
+  function setEnvAndRestore(): () => void {
+    const keys = ["HH_IMPORT_RATE_LIMIT_MAX", "HH_IMPORT_RATE_LIMIT_WINDOW_MS"];
+    const saved: Record<string, string | undefined> = {};
+    for (const k of keys) saved[k] = process.env[k];
+    return () => {
+      for (const k of keys) {
+        const v = saved[k];
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    };
+  }
+
+  it("A. allows normal traffic up to the limit (10/min/IP default)", async () => {
+    setFetchOk();
+    for (let i = 0; i < 10; i++) {
+      const res = await POST(makeRequest({ url: "https://hh.ru/vacancy/135822080" }));
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("B. blocks burst: 11th request -> 429 rate_limited with Retry-After", async () => {
+    setFetchOk();
+    for (let i = 0; i < 10; i++) {
+      await POST(makeRequest({ url: "https://hh.ru/vacancy/135822080" }));
+    }
+    const res = await POST(makeRequest({ url: "https://hh.ru/vacancy/135822080" }));
+    expect(res.status).toBe(429);
+    const retryAfter = res.headers.get("Retry-After");
+    expect(retryAfter).toBeTruthy();
+    expect(Number(retryAfter)).toBeGreaterThan(0);
+    const json = await res.json();
+    expect(json.ok).toBe(false);
+    expect(json.code).toBe("rate_limited");
+    expect(json.error).toContain("Слишком много");
+  });
+
+  it("B2. rate-limited request does NOT call HH (no outbound fetch)", async () => {
+    setFetchOk();
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return hhResponse(FIXTURE_VACANCY_HTML);
+    }) as unknown as typeof fetch;
+
+    for (let i = 0; i < 10; i++) {
+      await POST(makeRequest({ url: "https://hh.ru/vacancy/135822080" }));
+    }
+    const callsBefore = fetchCalls;
+    const res = await POST(makeRequest({ url: "https://hh.ru/vacancy/135822080" }));
+    expect(res.status).toBe(429);
+    expect(fetchCalls).toBe(callsBefore);
+  });
+
+  it("B3. limiter key does NOT depend on vacancy URL (different URLs same bucket)", async () => {
+    setFetchOk();
+    for (let i = 0; i < 5; i++) {
+      await POST(makeRequest({ url: `https://hh.ru/vacancy/13582208${i}` }));
+    }
+    // 6-й запрос с ДРУГИМ vacancy URL от того же IP — тот же bucket
+    const res = await POST(
+      makeRequest({ url: "https://hh.ru/vacancy/999999" }),
+    );
+    expect(res.status).toBe(200);
+    // всего 6 — но проверяем, что считает общий bucket, а не URL:
+    for (let i = 6; i < 10; i++) {
+      await POST(makeRequest({ url: `https://hh.ru/vacancy/13582208${i}` }));
+    }
+    const res2 = await POST(makeRequest({ url: "https://hh.ru/vacancy/777777" }));
+    expect(res2.status).toBe(429);
+  });
+
+  it("C. different IPs have independent buckets", async () => {
+    setFetchOk();
+    const restore = setEnvAndRestore();
+    try {
+      process.env.HH_IMPORT_RATE_LIMIT_MAX = "2";
+      hhImportRateLimiter.resetForTests();
+
+      for (let i = 0; i < 2; i++) {
+        await POST(makeRequestWithIp({ url: "https://hh.ru/vacancy/1" }, "9.9.9.9"));
+      }
+      const blocked = await POST(makeRequestWithIp({ url: "https://hh.ru/vacancy/1" }, "9.9.9.9"));
+      expect(blocked.status).toBe(429);
+
+      const other = await POST(makeRequestWithIp({ url: "https://hh.ru/vacancy/1" }, "8.8.8.8"));
+      expect(other.status).toBe(200);
+    } finally {
+      restore();
+    }
+  });
+
+  it("D. window expiration: after window passes, new request allowed", async () => {
+    setFetchOk();
+    const restore = setEnvAndRestore();
+    try {
+      process.env.HH_IMPORT_RATE_LIMIT_MAX = "1";
+      process.env.HH_IMPORT_RATE_LIMIT_WINDOW_MS = "50";
+      hhImportRateLimiter.resetForTests();
+
+      const first = await POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      expect(first.status).toBe(200);
+      const blocked = await POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      expect(blocked.status).toBe(429);
+
+      // window 50ms — реальный sleep в unit-тесте допустим для 60ms
+      await new Promise((r) => setTimeout(r, 70));
+
+      const after = await POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      expect(after.status).toBe(200);
+    } finally {
+      restore();
+    }
+  });
+
+  it("validation errors do NOT consume quota (ordering)", async () => {
+    const restore = setEnvAndRestore();
+    try {
+      process.env.HH_IMPORT_RATE_LIMIT_MAX = "1";
+      hhImportRateLimiter.resetForTests();
+
+      // invalid_body / invalid_url не расходуют квоту
+      await POST(makeRequest("{not json"));
+      await POST(makeRequest({ url: "https://evil.com/x" }));
+      await POST(makeRequest({ url: "" }));
+
+      const valid = await POST(makeRequest({ url: "https://hh.ru/vacancy/135822080" }));
+      expect(valid.status).toBe(200);
+    } finally {
+      restore();
+      setFetchOk();
+    }
+  });
+});
+
+describe("POST /api/vacancies/import — concurrency cap (P20)", () => {
+  it("E. saturates at HH_IMPORT_CONCURRENCY_MAX in-flight fetches", async () => {
+    const restore = (() => {
+      const saved = process.env.HH_IMPORT_CONCURRENCY_MAX;
+      return () => {
+        if (saved === undefined) delete process.env.HH_IMPORT_CONCURRENCY_MAX;
+        else process.env.HH_IMPORT_CONCURRENCY_MAX = saved;
+      };
+    })();
+    try {
+      process.env.HH_IMPORT_CONCURRENCY_MAX = "2";
+      hhImportRateLimiter.resetForTests();
+
+      // blocking fetch: висит до ручного release
+      const pending: Array<() => void> = [];
+      globalThis.fetch = (async () =>
+        new Promise<Response>((resolve) => {
+          pending.push(() => resolve(hhResponse(FIXTURE_VACANCY_HTML)));
+        })) as unknown as typeof fetch;
+
+      const p1 = POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      const p2 = POST(makeRequest({ url: "https://hh.ru/vacancy/2" }));
+      await new Promise((r) => setTimeout(r, 0));
+
+      const p3 = await POST(makeRequest({ url: "https://hh.ru/vacancy/3" }));
+      expect(p3.status).toBe(429);
+      expect((await p3.json()).code).toBe("rate_limited");
+      expect(p3.headers.get("Retry-After")).toBeTruthy();
+
+      pending[0]!();
+      const r1 = await p1;
+      expect(r1.status).toBe(200);
+
+      pending[1]!();
+      await p2;
+    } finally {
+      restore();
+    }
+  });
+
+  it("F. concurrency slot is released after fetch error (no deadlock)", async () => {
+    const restore = (() => {
+      const saved = process.env.HH_IMPORT_CONCURRENCY_MAX;
+      return () => {
+        if (saved === undefined) delete process.env.HH_IMPORT_CONCURRENCY_MAX;
+        else process.env.HH_IMPORT_CONCURRENCY_MAX = saved;
+      };
+    })();
+    try {
+      process.env.HH_IMPORT_CONCURRENCY_MAX = "1";
+      hhImportRateLimiter.resetForTests();
+
+      globalThis.fetch = (async () => {
+        throw new Error("fetch failed");
+      }) as unknown as typeof fetch;
+      const failed = await POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      expect(failed.status).toBe(502);
+
+      // слот обязан быть свободен: следующий запрос проходит до fetch
+      globalThis.fetch = (async () => hhResponse(FIXTURE_VACANCY_HTML)) as unknown as typeof fetch;
+      const next = await POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      expect(next.status).toBe(200);
+    } finally {
+      restore();
+    }
+  });
+
+  it("F2. concurrency slot released after timeout/abort too", async () => {
+    const restore = (() => {
+      const saved = process.env.HH_IMPORT_CONCURRENCY_MAX;
+      return () => {
+        if (saved === undefined) delete process.env.HH_IMPORT_CONCURRENCY_MAX;
+        else process.env.HH_IMPORT_CONCURRENCY_MAX = saved;
+      };
+    })();
+    try {
+      process.env.HH_IMPORT_CONCURRENCY_MAX = "1";
+      hhImportRateLimiter.resetForTests();
+
+      const timeoutFetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const err = new Error("The operation was aborted due to timeout");
+          err.name = "TimeoutError";
+          if (init?.signal?.aborted) reject(err);
+          else init?.signal?.addEventListener("abort", () => reject(err), { once: true });
+        })) as unknown as typeof fetch;
+      globalThis.fetch = timeoutFetch;
+
+      const timed = await POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      expect(timed.status).toBe(504);
+
+      globalThis.fetch = (async () => hhResponse(FIXTURE_VACANCY_HTML)) as unknown as typeof fetch;
+      const next = await POST(makeRequest({ url: "https://hh.ru/vacancy/1" }));
+      expect(next.status).toBe(200);
+    } finally {
+      restore();
+    }
+  }, 15_000);
+});
+
+/** Хелпер: request с явным X-Forwarded-For (per-IP bucket тесты). */
+function makeRequestWithIp(body: unknown, ip: string): Request {
+  return new Request("http://localhost/api/vacancies/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Forwarded-For": ip },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
