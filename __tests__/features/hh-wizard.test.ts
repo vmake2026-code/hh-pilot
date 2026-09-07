@@ -12,7 +12,7 @@ import {
 } from "../../features/hh-wizard";
 import { confirmField, missingField, inferField } from "../../types/confirmation";
 import { InMemoryStore } from "../../lib/persistence";
-import type { ResumeVersion } from "../../types/resume";
+import type { ResumeVersion, WorkExperience, Education, Skill } from "../../types/resume";
 
 // P24: HH wizard MVP contract — human-readable formatters (no
 // undefined/null/[object Object]/"(N элементов)" artifacts), 7-field
@@ -197,6 +197,85 @@ describe("formatSkillsForHH", () => {
 
   it("empty input -> empty string", () => {
     expect(formatSkillsForHH([])).toBe("");
+  });
+
+  it("corrupted skill name (number) is skipped, not crashed or coerced", () => {
+    const skills = [
+      { name: 42, level: "advanced" },
+      { name: "React", level: "advanced" },
+    ] as unknown as Skill[];
+    expect(formatSkillsForHH(skills)).toBe("React — Продвинутый");
+  });
+
+  it("corrupted education institution (number) is skipped without crash", () => {
+    const education = [
+      {
+        id: "e1",
+        institution: 42,
+        degree: "Бакалавр",
+        field: "Информатика",
+        startDate: "09/2016",
+        endDate: "06/2020",
+        description: "",
+      },
+    ] as unknown as Education[];
+    // Corrupted institution is skipped; intact fields still render.
+    const text = formatEducationForHH(education);
+    expect(text).not.toContain("42");
+    expect(text).toContain("Бакалавр, Информатика");
+    expect(text).toContain("09/2016 — 06/2020");
+  });
+
+  it("corrupted experience company (object) and startDate (number) do not crash", () => {
+    const work = [
+      {
+        id: "w1",
+        company: { poisoned: true },
+        position: "Frontend Developer",
+        startDate: 42,
+        endDate: null,
+        isCurrent: true,
+        description: "Работа.",
+        achievements: [7, "Сократил TTI на 40%"],
+      },
+    ] as unknown as WorkExperience[];
+    const text = formatExperienceForHH(work);
+    // Surviving well-typed parts render; corrupted ones are skipped.
+    expect(text).toContain("Frontend Developer");
+    expect(text).toContain("Работа.");
+    expect(text).toContain("• Сократил TTI на 40%");
+    expect(text).not.toContain("42");
+    expect(text).not.toContain("[object Object]");
+    expect(text).not.toContain("undefined");
+  });
+
+  it("generateInstructions over type-corrupted nested data never crashes", () => {
+    const wizard = createHHWizard();
+    expect(() =>
+      wizard.generateInstructions({
+        desiredPosition: confirmField("Dev"),
+        summary: missingField(),
+        salaryExpectation: missingField(),
+        workExperience: [
+          {
+            id: "w1",
+            company: 42,
+            position: null,
+            startDate: {},
+            endDate: undefined,
+            isCurrent: false,
+            description: 42,
+            achievements: [42],
+          },
+        ] as unknown as WorkExperience[],
+        education: [
+          { id: "e1", institution: 42, degree: 42, field: 42, startDate: 42 },
+        ] as unknown as Education[],
+        skills: [{ name: 42, level: "expert" }] as unknown as Skill[],
+        workFormat: "remote",
+        employmentType: "full_time",
+      }),
+    ).not.toThrow();
   });
 });
 

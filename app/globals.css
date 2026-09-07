@@ -812,6 +812,9 @@ h1 {
 .preview-actions-right {
   display: flex;
   gap: 8px;
+  /* P26-F3: three CTA buttons no longer fit a 360px-wide bar in one row —
+     allow the group itself to wrap (the bar already wraps). */
+  flex-wrap: wrap;
 }
 
 /* ---- Resume document ---- */

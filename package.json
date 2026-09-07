@@ -20,8 +20,11 @@
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "@types/react-test-renderer": "^19.1.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "^15.5.23",
+    "puppeteer-core": "^25.10.0",
+    "react-test-renderer": "^19.2.8",
     "typescript": "^5.9.0",
     "vitest": "^4.1.10"
   }

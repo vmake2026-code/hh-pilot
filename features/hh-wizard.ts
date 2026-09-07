@@ -113,6 +113,17 @@ function formatConfidentText(field: Confident<string>): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * P26-F5: nested strings come from localStorage records where only the
+ * arrays are validated, not each element. A corrupted value (number,
+ * object, …) must not crash the wizard with "x is not a function" from
+ * .trim() — it is skipped like any other missing value ("" for
+ * formatting purposes), never coerced with String().
+ */
+function safeText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 /** Enum value → existing project label ("" for unknown/missing). */
 function formatEmploymentTypeForHH(value: string | undefined): string {
   if (!value) return "";
@@ -125,9 +136,10 @@ function formatPeriod(
   end: string | null,
   isCurrent: boolean,
 ): string {
-  const from = start?.trim() ?? "";
+  const from = safeText(start);
   if (!from) return "";
-  if (end && end.trim()) return `${from} — ${end.trim()}`;
+  const to = safeText(end);
+  if (to) return `${from} — ${to}`;
   if (isCurrent) return `${from} — по настоящее время`;
   return from;
 }
@@ -137,17 +149,17 @@ function formatExperienceForHH(items: WorkExperience[]): string {
   const blocks = items
     .map((item) => {
       const lines: string[] = [];
-      const company = item.company?.trim() ?? "";
-      const position = item.position?.trim() ?? "";
+      const company = safeText(item.company);
+      const position = safeText(item.position);
       if (position && company) lines.push(`${position} — ${company}`);
       else if (company) lines.push(company);
       else if (position) lines.push(position);
       const period = formatPeriod(item.startDate, item.endDate, item.isCurrent);
       if (period) lines.push(period);
-      const description = item.description?.trim() ?? "";
+      const description = safeText(item.description);
       if (description) lines.push("", description);
       const achievements = (item.achievements ?? [])
-        .map((a) => (typeof a === "string" ? a.trim() : ""))
+        .map((a) => safeText(a))
         .filter(Boolean);
       if (achievements.length > 0) {
         lines.push("", "Достижения:");
@@ -164,10 +176,10 @@ function formatEducationForHH(items: Education[]): string {
   const blocks = items
     .map((item) => {
       const lines: string[] = [];
-      const institution = item.institution?.trim() ?? "";
+      const institution = safeText(item.institution);
       if (institution) lines.push(institution);
-      const degree = item.degree?.trim() ?? "";
-      const field = item.field?.trim() ?? "";
+      const degree = safeText(item.degree);
+      const field = safeText(item.field);
       if (degree && field) lines.push(`${degree}, ${field}`);
       else if (degree) lines.push(degree);
       else if (field) lines.push(field);
@@ -185,7 +197,7 @@ function formatEducationForHH(items: Education[]): string {
 function formatSkillsForHH(skills: Skill[]): string {
   return skills
     .map((skill) => {
-      const name = skill?.name?.trim() ?? "";
+      const name = safeText(skill?.name);
       if (!name) return "";
       const level = skillLevelLabel(skill.level);
       return level ? `${name} — ${level}` : name;
@@ -346,6 +358,7 @@ export {
   formatExperienceForHH,
   formatEducationForHH,
   formatSkillsForHH,
+  safeText,
   saveHHWizardProgress,
   loadHHWizardProgress,
 };

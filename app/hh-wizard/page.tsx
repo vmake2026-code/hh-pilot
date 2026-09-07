@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { listResumeRecords, getResumeRecord } from "@/services/resume-persistence";
+import { listResumeRecords } from "@/services/resume-persistence";
 import { useClientData } from "@/features/use-client-data";
 import { createPersistenceStore } from "@/lib/persistence";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -51,13 +51,6 @@ function HHWizardClient() {
     if (resumeIdParam) setSelectedResumeId(resumeIdParam);
   }, [deepLinkApplied, recordsState.ready, resumeIdParam]);
 
-  const recordResult = useClientData(
-    useCallback(() => {
-      if (!selectedResumeId) return null;
-      return getResumeRecord(selectedResumeId);
-    }, [selectedResumeId]),
-  );
-
   const [instructions, setInstructions] = useState<HHFieldInstruction[]>([]);
   const [progressError, setProgressError] = useState("");
   // Copied feedback per field key: transient, never conflated with completion.
@@ -69,11 +62,14 @@ function HHWizardClient() {
     [recordsState.data],
   );
 
+  // P26-F1: the record is derived from the already-loaded records list
+  // (match-page pattern) — no second localStorage read, no extra lifecycle,
+  // and selection/reload stay in sync with a single data source. The
+  // previous second useClientData loaded only once at mount (loader for
+  // selectedResumeId=""), so every valid resume rendered "not found".
   const record: ResumeRecord | null = selectedResumeId
-    ? recordResult.ready
-      ? recordResult.data
-      : null
-    : records.find((r) => r.id === selectedResumeId) ?? null;
+    ? records.find((r) => r.id === selectedResumeId) ?? null
+    : null;
 
   // Build instructions + restore persisted progress whenever the selected
   // record changes. loadHHWizardProgress shape-guards damaged storage data.
@@ -213,8 +209,8 @@ function HHWizardClient() {
     );
   }
 
-  // ---------- Loading selected record ----------
-  if (!recordResult.ready) {
+  // ---------- Loading records / resolving selection ----------
+  if (!recordsState.ready) {
     return <Loading />;
   }
 

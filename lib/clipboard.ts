@@ -23,8 +23,9 @@ function copyViaClipboardApi(text: string): Promise<boolean> {
 
 function copyViaExecCommand(text: string): boolean {
   if (typeof document === "undefined") return false;
+  let textarea: HTMLTextAreaElement | null = null;
   try {
-    const textarea = document.createElement("textarea");
+    textarea = document.createElement("textarea");
     textarea.value = text;
     // Position off-screen but still rendered so selection works.
     textarea.style.position = "fixed";
@@ -33,11 +34,13 @@ function copyViaExecCommand(text: string): boolean {
     document.body.appendChild(textarea);
     textarea.focus();
     textarea.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(textarea);
-    return ok;
+    return document.execCommand("copy");
   } catch {
     return false;
+  } finally {
+    // P26-F4: cleanup runs on success, failure, and throw — a leaked
+    // off-screen textarea would otherwise accumulate in the DOM.
+    textarea?.remove();
   }
 }
 
