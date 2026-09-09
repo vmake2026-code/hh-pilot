@@ -33,6 +33,44 @@ describe("SSRF protection", () => {
     expect(isAllowedUrl("not-a-url")).toBe(false);
     expect(isAllowedUrl("")).toBe(false);
   });
+
+  // P30: явные SSRF-кейсы — hh.ru-only allowlist отклоняет любые
+  // loopback/private/metadata адреса независимо от их кодирования.
+  it("blocks localhost and loopback names (P30 SSRF lock)", () => {
+    expect(isAllowedUrl("http://localhost/x")).toBe(false);
+    expect(isAllowedUrl("http://localhost:3000/admin")).toBe(false);
+    expect(isAllowedUrl("http://127.0.0.1/x")).toBe(false);
+    expect(isAllowedUrl("http://127.0.0.1:8080/")).toBe(false);
+    expect(isAllowedUrl("https://[::1]/x")).toBe(false);
+  });
+
+  it("blocks private network ranges (P30 SSRF lock)", () => {
+    expect(isAllowedUrl("http://192.168.0.1/router")).toBe(false);
+    expect(isAllowedUrl("http://10.0.0.1/internal")).toBe(false);
+    expect(isAllowedUrl("http://172.16.0.1/")).toBe(false);
+    expect(isAllowedUrl("http://169.254.169.254/latest/meta-data/")).toBe(false);
+    expect(isAllowedUrl("http://192.168.1.106:3000/")).toBe(false);
+  });
+
+  it("blocks decimal/octal IP encodings and local-domain tricks (P30 SSRF lock)", () => {
+    // 2130706433 == 127.0.0.1 в decimal-нотации; Node URL канонизирует
+    // оба варианта в 127.0.0.1, что не проходит hh.ru-only allowlist.
+    expect(isAllowedUrl("http://2130706433/x")).toBe(false);
+    expect(isAllowedUrl("http://0177.0.0.1/x")).toBe(false);
+    expect(isAllowedUrl("http://hh.ru.local/vacancy")).toBe(false);
+    expect(isAllowedUrl("http://localhh.ru/vacancy")).toBe(false);
+  });
+
+  it("still allows legitimate hh.ru subdomains (allowlist contract unchanged)", () => {
+    expect(isAllowedUrl("https://api.hh.ru/vacancies")).toBe(true);
+    expect(isAllowedUrl("https://hh.ru/vacancy/1")).toBe(true);
+  });
+
+  it("private-looking URLs are also null through sanitizeUrl (defense in depth)", () => {
+    expect(sanitizeUrl("http://localhost/x")).toBeNull();
+    expect(sanitizeUrl("http://169.254.169.254/latest/meta-data/")).toBeNull();
+    expect(sanitizeUrl("http://2130706433/x")).toBeNull();
+  });
 });
 
 describe("sanitizeUrl", () => {

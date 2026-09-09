@@ -478,3 +478,88 @@ describe("POST /api/ai/analyze — concurrency cap (P10.5)", () => {
     expect(next.status).toBe(200);
   });
 });
+
+// ---------- P30: provider timeout + outgoing request shape ----------
+
+describe("POST /api/ai/analyze — provider timeout (P30)", () => {
+  it("provider TimeoutError -> sanitized 502 provider_unavailable, no internals leaked", async () => {
+    configureRealProvider();
+    // AbortSignal.timeout() в Node бросает DOMException с именем TimeoutError;
+    // эмулируем его из hung-стаба (никаких реальных 30с ожиданий).
+    globalThis.fetch = (async () => {
+      const err = new Error("The operation was aborted due to timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }) as unknown as typeof fetch;
+
+    const res = await POST(makeRequest({ input: makeInput(), versionId: "v-1" }));
+    const raw = await res.text();
+
+    expect(res.status).toBe(502);
+    const json = JSON.parse(raw);
+    expect(json.ok).toBe(false);
+    expect(json.code).toBe("provider_unavailable");
+    expect(json.error).toBe("AI-сервис недоступен");
+    // Таймаут-детали не уходят наружу
+    expect(raw).not.toContain("aborted");
+    expect(raw).not.toContain("timeout");
+    expect(raw).not.toContain("TimeoutError");
+    expect(raw).not.toContain("SECRET-TEST-KEY");
+  });
+
+  it("concurrency slot is released after a provider timeout (no deadlock)", async () => {
+    configureRealProvider();
+    process.env.AI_CONCURRENCY_MAX = "1";
+
+    globalThis.fetch = (async () => {
+      const err = new Error("The operation was aborted due to timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }) as unknown as typeof fetch;
+    const timedOut = await POST(makeRequest({ input: makeInput(), versionId: "v-1" }));
+    expect(timedOut.status).toBe(502);
+
+    // слот освобождён: следующий запрос доходит до provider
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ choices: [{ message: { content: analysisContent() } }] }),
+      { status: 200 },
+    )) as unknown as typeof fetch;
+    const next = await POST(makeRequest({ input: makeInput(), versionId: "v-1" }));
+    expect(next.status).toBe(200);
+  });
+});
+
+describe("POST /api/ai/analyze — outgoing provider request shape (P30)", () => {
+  it("provider is called at the configured URL with Authorization header and JSON body", async () => {
+    configureRealProvider();
+
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url);
+      capturedInit = init;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: analysisContent() } }] }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const res = await POST(makeRequest({ input: makeInput(), versionId: "v-1" }));
+    expect(res.status).toBe(200);
+
+    // Секрет уходит ТОЛЬКО в Authorization header по настроенному baseUrl
+    expect(capturedUrl).toBe("https://provider.test/v1/chat/completions");
+    expect((capturedInit?.headers as Record<string, string>)["Authorization"]).toBe("Bearer SECRET-TEST-KEY");
+    expect((capturedInit?.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+
+    const body = JSON.parse(String(capturedInit?.body));
+    expect(body.model).toBe("gpt-4o-mini");
+    expect(typeof body.max_tokens).toBe("number");
+    // messages: system prompt (если есть) + user payload
+    expect(Array.isArray(body.messages)).toBe(true);
+    expect(body.messages.length).toBeGreaterThan(0);
+    expect(body.messages[body.messages.length - 1].role).toBe("user");
+    // Секрет не в теле запроса
+    expect(String(capturedInit?.body)).not.toContain("SECRET-TEST-KEY");
+  });
+});
