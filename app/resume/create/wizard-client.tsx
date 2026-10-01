@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -66,6 +66,21 @@ export default function WizardClient() {
   const [notFound, setNotFound] = useState(false);
   const [saveError, setSaveError] = useState("");
 
+  // P30-FOLLOWUP: handle for the "черновик сохранён" auto-hide timer. Without
+  // it the timer survived unmount and fired setDraftSaved on a dead component.
+  // Cleanup is unmount-only on purpose — repeated saves keep their existing
+  // timing semantics (each save starts its own 2000 ms timer).
+  const draftSavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (draftSavedTimer.current) {
+        clearTimeout(draftSavedTimer.current);
+        draftSavedTimer.current = null;
+      }
+    };
+  }, []);
+
   // Load draft or existing resume on mount
   useEffect(() => {
     if (editResumeId) {
@@ -118,7 +133,7 @@ export default function WizardClient() {
     }
     setSaveError("");
     setDraftSaved(true);
-    setTimeout(() => setDraftSaved(false), 2000);
+    draftSavedTimer.current = setTimeout(() => setDraftSaved(false), 2000);
   }, [data, step, confirmedFields, draftContext]);
 
   const updateField = useCallback(
