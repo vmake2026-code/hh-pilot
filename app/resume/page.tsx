@@ -1,17 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { listResumeRecords, deleteResumeRecord } from "@/services/resume-persistence";
 import { useClientData } from "@/features/use-client-data";
 import { buildResumeListItems } from "@/features/resume-list";
+import {
+  DRAFT_CONTEXT_NEW,
+  draftKeyFor,
+  normalizeDraft,
+  discardDraft,
+} from "@/features/resume-wizard";
+import { createPersistenceStore } from "@/lib/persistence";
 import Loading from "@/components/ui/loading";
 import type { ResumeRecord } from "@/types/resume";
+
+const draftStore = createPersistenceStore<unknown>();
 
 export default function ResumePage() {
   const { data, ready, refresh } = useClientData(listResumeRecords);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
+  // P32-6: an existing creation draft is announced here. Without it
+  // "+ Создать с нуля" silently continued the previous half-done resume and the
+  // user had no way to start over.
+  const [draftStep, setDraftStep] = useState<number | null>(null);
+
+  useEffect(() => {
+    const saved = normalizeDraft(draftStore.get(draftKeyFor(DRAFT_CONTEXT_NEW)));
+    setDraftStep(saved ? saved.step : null);
+  }, []);
+
+  const handleDiscardDraft = useCallback(() => {
+    const confirmed = window.confirm(
+      "Удалить сохранённый черновик?\n\nВведённые данные будут потеряны.",
+    );
+    if (!confirmed) return;
+    discardDraft(draftStore, DRAFT_CONTEXT_NEW);
+    setDraftStep(null);
+  }, []);
 
   // P11.2A: destructive action с confirmation. Один клик = максимум одна
   // persistence-операция (deletingId блокирует повторный submit). Ошибка не
@@ -54,11 +81,36 @@ export default function ResumePage() {
       <div className="page-header">
         <h1>Резюме</h1>
         <div className="page-header-actions">
-          <Link href="/resume/create" className="btn btn-primary btn-md">
-            + Создать с нуля
-          </Link>
+          {draftStep !== null ? (
+            <>
+              <Link href="/resume/create" className="btn btn-primary btn-md">
+                Продолжить черновик
+              </Link>
+              <button
+                type="button"
+                className="btn btn-secondary btn-md"
+                onClick={handleDiscardDraft}
+              >
+                Начать заново
+              </button>
+            </>
+          ) : (
+            <Link href="/resume/create" className="btn btn-primary btn-md">
+              + Создать с нуля
+            </Link>
+          )}
         </div>
       </div>
+
+      {draftStep !== null && (
+        <div
+          className="wizard-toast"
+          style={{ background: "#fef3c7", color: "#92400e" }}
+        >
+          Есть сохранённый черновик (шаг {draftStep} из 8). «Продолжить черновик»
+          откроет его, «Начать заново» удалит его.
+        </div>
+      )}
 
       {deleteError && (
         <p className="form-error" role="alert">{deleteError}</p>
@@ -69,7 +121,7 @@ export default function ResumePage() {
           <p>У вас пока нет резюме.</p>
           <p>Создайте резюме с нуля за 8 шагов — с проверкой фактов и версиями.</p>
           <Link href="/resume/create" className="btn btn-primary btn-md">
-            Создать с нуля
+            {draftStep !== null ? "Продолжить черновик" : "Создать с нуля"}
           </Link>
         </div>
       ) : (

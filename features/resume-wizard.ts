@@ -146,15 +146,21 @@ function canGoBackFrom(step: WizardStep): boolean {
 }
 
 /**
- * Finalize (step 8) and the step-7 advance stay blocked while required
- * confirmations are missing. Navigation backwards never bypasses them:
- * canFinalize is independent of the current step.
+ * Finalize (step 8) stays blocked while required confirmations are missing.
+ * Navigation backwards never bypasses it: canFinalize is independent of the
+ * current step.
+ *
+ * P32-2: step 7 (preview) always advances. Gating it on the fact-check gate
+ * produced a dead end — a user who filled steps 1-7 but never pressed the
+ * confirmation controls could neither advance nor understand why. The blocking
+ * UX point moved to step 8, which is the screen that actually lists the
+ * unconfirmed fields and tells the user where to go.
  */
 function canProceedFrom(
   step: WizardStep,
   allowed: boolean,
 ): boolean {
-  if (step < 7) return true;
+  if (step < 8) return true;
   return allowed;
 }
 
@@ -178,6 +184,76 @@ function persistDraft(
   } catch {
     return false;
   }
+}
+
+// ---------- Draft autosave + discard (P32-1 / P32-6) ----------
+
+/**
+ * P32-1: wizard state lives only in React state, so leaving the page or
+ * reloading loses everything the user typed. Autosave writes the same draft
+ * envelope, debounced, so localStorage is not written on every keystroke.
+ */
+const DRAFT_AUTOSAVE_DEBOUNCE_MS = 600;
+
+/**
+ * Stable identity of one draft snapshot. The autosave compares it with the
+ * last persisted/decided snapshot to answer a single question: does the stored
+ * draft already match what the wizard holds? A blank wizard, a just-restored
+ * draft, a discarded draft and a finalized resume all produce "nothing to save".
+ */
+function draftFingerprint(
+  data: WizardData,
+  step: number,
+  confirmedFields: Set<string>,
+): string {
+  return JSON.stringify({
+    step,
+    confirmedFields: [...confirmedFields],
+    data,
+  });
+}
+
+/**
+ * P32-6: remove the draft of one context. Edit drafts (resume-draft:<id>) and
+ * the creation draft (resume-draft:new) live under separate keys, so discarding
+ * the creation draft never touches an in-progress edit of an existing resume.
+ */
+function discardDraft(
+  draftStore: PersistenceStore<unknown>,
+  context: string,
+): void {
+  draftStore.remove(draftKeyFor(context));
+}
+
+// ---------- Confirmation invalidation on edit (P32-5) ----------
+
+/** Fields whose "Подтверждено" state is gated by the fact-check step. */
+const CONFIRMATION_GATED_FIELDS = REQUIRED_FIELDS.map(({ path }) => path);
+
+function isConfirmationGatedField(field: string): boolean {
+  return CONFIRMATION_GATED_FIELDS.includes(field);
+}
+
+/**
+ * P32-5: a confirmed field whose value the user changed is no longer
+ * confirmed — otherwise the UI keeps showing "✓ Подтверждено" for a value the
+ * user never saw. Returns the SAME set when nothing changes so React state
+ * updates stay cheap and confirmations survive unrelated edits.
+ */
+function invalidateConfirmation(
+  confirmed: Set<string>,
+  field: string,
+  previousValue?: string,
+  nextValue?: string,
+): Set<string> {
+  if (!isConfirmationGatedField(field)) return confirmed;
+  if (previousValue !== undefined && nextValue !== undefined && previousValue === nextValue) {
+    return confirmed;
+  }
+  if (!confirmed.has(field)) return confirmed;
+  const next = new Set(confirmed);
+  next.delete(field);
+  return next;
 }
 
 // ---------- Fact-check ----------
@@ -509,7 +585,9 @@ export type { WizardData, WizardStep, FieldCheck, FinalizeResult, WizardDraftSta
 export {
   WIZARD_STEPS,
   REQUIRED_FIELDS,
+  CONFIRMATION_GATED_FIELDS,
   DRAFT_CONTEXT_NEW,
+  DRAFT_AUTOSAVE_DEBOUNCE_MS,
   createDefaultWizardData,
   createEmptyWorkExperience,
   createEmptyEducation,
@@ -530,4 +608,8 @@ export {
   canGoBackFrom,
   canProceedFrom,
   persistDraft,
+  discardDraft,
+  draftFingerprint,
+  isConfirmationGatedField,
+  invalidateConfirmation,
 };

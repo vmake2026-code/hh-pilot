@@ -6,6 +6,7 @@ import {
   validatePhone,
   validateTextInput,
   sanitizeText,
+  sanitizeTextInput,
   sanitizeHTML,
   limitLength,
 } from "../../lib/security";
@@ -142,6 +143,36 @@ describe("sanitizeText", () => {
 
   it("trims whitespace", () => {
     expect(sanitizeText("  hello  ")).toBe("hello");
+  });
+
+  // P32-4: canonical trim is still available for blur/persist/finalize, but it
+  // must never be applied to a controlled input's per-keystroke value.
+  it("still trims only at the outer edges (canonical form)", () => {
+    expect(sanitizeText("  Иван Петров  ")).toBe("Иван Петров");
+    expect(sanitizeText("Frontend Developer")).toBe("Frontend Developer");
+  });
+});
+
+// ---------- P32-4: typing sanitizer must not eat user spaces ----------
+
+describe("sanitizeTextInput (P32-4)", () => {
+  it("keeps interior and trailing spaces while typing", () => {
+    expect(sanitizeTextInput("Frontend ")).toBe("Frontend ");
+    expect(sanitizeTextInput("Frontend Developer")).toBe("Frontend Developer");
+    expect(sanitizeTextInput("Опыт в frontend")).toBe("Опыт в frontend");
+    expect(sanitizeTextInput("ООО Рога и Копыта")).toBe("ООО Рога и Копыта");
+    expect(sanitizeTextInput("  lead")).toBe("  lead");
+  });
+
+  it("still strips null bytes and control characters", () => {
+    expect(sanitizeTextInput("Иван\x00 Петров")).toBe("Иван Петров");
+    expect(sanitizeTextInput("a\x01b\x1fc")).toBe("abc");
+    expect(sanitizeTextInput("line\nbreak")).toBe("line\nbreak");
+  });
+
+  it("is the non-trimming half of sanitizeText (no security regression)", () => {
+    const raw = "  a\x00b\x02  ";
+    expect(sanitizeTextInput(raw).trim()).toBe(sanitizeText(raw));
   });
 });
 

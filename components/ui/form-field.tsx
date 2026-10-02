@@ -12,6 +12,7 @@ interface FormFieldProps {
   options?: { value: string; label: string }[];
   rows?: number;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   onConfirm?: () => void;
   confirmationLevel?: "confirmed" | "inferred" | "missing";
 }
@@ -28,6 +29,7 @@ export default function FormField({
   options,
   rows,
   onChange,
+  onBlur,
   onConfirm,
   confirmationLevel,
 }: FormFieldProps) {
@@ -49,6 +51,7 @@ export default function FormField({
           disabled={disabled}
           rows={rows ?? 3}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
         />
       ) : type === "select" && options ? (
         <select
@@ -57,6 +60,7 @@ export default function FormField({
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
         >
           <option value="">— Выберите —</option>
           {options.map((opt) => (
@@ -74,6 +78,7 @@ export default function FormField({
           placeholder={placeholder}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
         />
       )}
 

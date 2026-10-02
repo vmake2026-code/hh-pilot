@@ -14,6 +14,8 @@ interface WizardLayoutProps {
   canGoNext: boolean;
   nextLabel?: string;
   isLastStep?: boolean;
+  /** P32-3: finalize is running — the button must show a pending state. */
+  finalizing?: boolean;
   onFinalize?: () => void;
 }
 
@@ -29,6 +31,7 @@ export default function WizardLayout({
   canGoNext,
   nextLabel,
   isLastStep,
+  finalizing,
   onFinalize,
 }: WizardLayoutProps) {
   return (
@@ -66,9 +69,9 @@ export default function WizardLayout({
               type="button"
               className="btn btn-primary btn-md"
               onClick={onFinalize}
-              disabled={!canGoNext}
+              disabled={!canGoNext || finalizing}
             >
-              Создать резюме
+              {finalizing ? "Создаём резюме…" : "Создать резюме"}
             </button>
           ) : (
             <button

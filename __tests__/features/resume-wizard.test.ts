@@ -9,6 +9,13 @@ import {
   canGoBackFrom,
   canProceedFrom,
   persistDraft,
+  discardDraft,
+  draftFingerprint,
+  isConfirmationGatedField,
+  invalidateConfirmation,
+  CONFIRMATION_GATED_FIELDS,
+  DRAFT_AUTOSAVE_DEBOUNCE_MS,
+  draftKeyFor,
   WIZARD_STEPS,
 } from "../../features/resume-wizard";
 
@@ -187,9 +194,13 @@ describe("wizard navigation contract (P14-F1)", () => {
     expect(canProceedFrom(8, allowed)).toBe(false);
   });
 
-  it("step 7 advance stays blocked when confirmations incomplete", () => {
+  it("step 7 advance is NOT blocked by missing confirmations (P32-2)", () => {
+    // P32-2: gating the preview step on the fact-check gate created a dead end
+    // — steps 1-7 filled, but "Далее" disabled with no explanation. The blocking
+    // UX point moved to step 8, which lists the unconfirmed fields.
     const { allowed } = canFinalize(createDefaultWizardData(), new Set());
-    expect(canProceedFrom(7, allowed)).toBe(false);
+    expect(allowed).toBe(false);
+    expect(canProceedFrom(7, allowed)).toBe(true);
   });
 
   it("having back does not bypass confirmations: allowed finalize stays allowed", () => {
@@ -253,5 +264,85 @@ describe("persistDraft write-failure contract (P14-F2)", () => {
     const result = persistDraft(store, "new", makeData(), 3, new Set(["phone"]));
     expect(result).toBe(true);
     expect(written.length).toBe(1);
+  });
+});
+
+// ---------- P32-5: confirmation is invalidated when the value changes ----------
+
+describe("invalidateConfirmation (P32-5)", () => {
+  const confirmed = () =>
+    new Set(["phone", "email", "desiredPosition"]);
+
+  it("exactly the three fact-check-gated fields are gated", () => {
+    expect(CONFIRMATION_GATED_FIELDS).toEqual(["phone", "email", "desiredPosition"]);
+    expect(isConfirmationGatedField("phone")).toBe(true);
+    expect(isConfirmationGatedField("email")).toBe(true);
+    expect(isConfirmationGatedField("desiredPosition")).toBe(true);
+    expect(isConfirmationGatedField("firstName")).toBe(false);
+  });
+
+  it("a changed gated field loses its confirmation", () => {
+    const next = invalidateConfirmation(confirmed(), "phone", "+79001234567", "+79007654321");
+    expect(next.has("phone")).toBe(false);
+    expect(next.has("email")).toBe(true);
+    expect(next.has("desiredPosition")).toBe(true);
+  });
+
+  it("an unchanged gated field keeps its confirmation (no pointless reset)", () => {
+    const before = confirmed();
+    const next = invalidateConfirmation(before, "email", "a@b.com", "a@b.com");
+    expect(next.has("email")).toBe(true);
+    expect(next).toBe(before);
+  });
+
+  it("editing an unrelated field never touches confirmations", () => {
+    const before = confirmed();
+    const next = invalidateConfirmation(before, "firstName", "Иван", "Иван Петров");
+    expect(next).toBe(before);
+    expect([...next].sort()).toEqual(["desiredPosition", "email", "phone"]);
+  });
+
+  it("an unconfirmed gated field returns the same set (no re-render churn)", () => {
+    const before = new Set(["email"]);
+    const next = invalidateConfirmation(before, "phone", "1", "2");
+    expect(next).toBe(before);
+  });
+});
+
+// ---------- P32-1: autosave identity + P32-6: draft discard ----------
+
+describe("draftFingerprint (P32-1)", () => {
+  const data = { ...createDefaultWizardData(), firstName: "Иван Петров" };
+
+  it("is stable for equal state and differs for any state change", () => {
+    const base = draftFingerprint(data, 3, new Set(["phone"]));
+    expect(draftFingerprint({ ...data }, 3, new Set(["phone"]))).toBe(base);
+    expect(draftFingerprint(data, 4, new Set(["phone"]))).not.toBe(base);
+    expect(draftFingerprint(data, 3, new Set(["phone", "email"]))).not.toBe(base);
+    expect(
+      draftFingerprint({ ...data, firstName: "Иван" }, 3, new Set(["phone"])),
+    ).not.toBe(base);
+  });
+
+  it("the debounce window is long enough to skip per-keystroke writes", () => {
+    expect(DRAFT_AUTOSAVE_DEBOUNCE_MS).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("discardDraft (P32-6)", () => {
+  it("removes only the draft of the given context", () => {
+    const store = {
+      data: new Map<string, unknown>(),
+      get(key: string) { return this.data.get(key) ?? null; },
+      set(key: string, value: unknown) { this.data.set(key, value); },
+      remove(key: string) { this.data.delete(key); },
+    };
+    store.set(draftKeyFor("new"), { step: 3 });
+    store.set(draftKeyFor("resume-1"), { step: 5 });
+
+    discardDraft(store, "new");
+
+    expect(store.get(draftKeyFor("new"))).toBeNull();
+    expect(store.get(draftKeyFor("resume-1"))).not.toBeNull();
   });
 });

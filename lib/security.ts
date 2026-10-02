@@ -53,10 +53,22 @@ function validateTextInput(
 // ---------- Sanitization ----------
 
 function sanitizeText(input: string): string {
+  return sanitizeTextInput(input).trim();
+}
+
+/**
+ * P32-4: sanitization for CONTROLLED inputs. Strips the same dangerous
+ * characters as sanitizeText but never touches whitespace.
+ *
+ * A controlled <input> round-trips every keystroke through its onChange, so
+ * trimming there deletes the space the user has just typed
+ * ("Frontend " -> "Frontend" -> "FrontendD"). Canonical trimming belongs to
+ * blur/persist/finalize, which still use sanitizeText.
+ */
+function sanitizeTextInput(input: string): string {
   return input
     .replace(/\0/g, "")
-    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, "")
-    .trim();
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
 
 function sanitizeHTML(input: string): string {
@@ -81,6 +93,7 @@ export {
   validatePhone,
   validateTextInput,
   sanitizeText,
+  sanitizeTextInput,
   sanitizeHTML,
   limitLength,
 };

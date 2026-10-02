@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   WIZARD_STEPS,
   DRAFT_CONTEXT_NEW,
+  DRAFT_AUTOSAVE_DEBOUNCE_MS,
   createDefaultWizardData,
   createEmptyWorkExperience,
   createEmptyEducation,
@@ -17,6 +18,9 @@ import {
   createNewVersion,
   draftKeyFor,
   normalizeDraft,
+  discardDraft,
+  draftFingerprint,
+  invalidateConfirmation,
   parseAchievements,
   achievementsToText,
   canGoBackFrom,
@@ -34,7 +38,7 @@ import FormField from "@/components/ui/form-field";
 import Loading from "@/components/ui/loading";
 import { createPersistenceStore } from "@/lib/persistence";
 import { getResumeRecord } from "@/services/resume-persistence";
-import { sanitizeText } from "@/lib/security";
+import { sanitizeText, sanitizeTextInput } from "@/lib/security";
 
 const draftStore = createPersistenceStore<unknown>();
 
@@ -47,6 +51,18 @@ const WORK_FORMAT_OPTIONS = Object.entries(WORK_FORMAT_LABELS).map(
 const EMPLOYMENT_OPTIONS = Object.entries(EMPLOYMENT_TYPE_LABELS).map(
   ([value, label]) => ({ value, label }),
 );
+
+/**
+ * Comma-separated languages text -> canonical string[]: trim each item, drop
+ * empties, keep order. The single definition used by BOTH the blur commit and
+ * the P33-F-14 draft snapshot, so the two can never drift apart.
+ */
+function parseLanguagesText(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 export default function WizardClient() {
   const router = useRouter();
@@ -65,12 +81,59 @@ export default function WizardClient() {
   const [booted, setBooted] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [saveError, setSaveError] = useState("");
+  // P32-3: finalize is a state transition, not only a disabled button.
+  const [finalizing, setFinalizing] = useState(false);
+  // P32-6: a restored creation draft is announced and can be discarded.
+  const [restoredDraft, setRestoredDraft] = useState<{ step: number } | null>(null);
 
   // P30-FOLLOWUP: handle for the "черновик сохранён" auto-hide timer. Without
   // it the timer survived unmount and fired setDraftSaved on a dead component.
   // Cleanup is unmount-only on purpose — repeated saves keep their existing
   // timing semantics (each save starts its own 2000 ms timer).
   const draftSavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // P32-1: mirror of the current wizard state. Autosave, the unmount flush and
+  // the P32-5 "did this field actually change?" check all need the LATEST value
+  // from an effect cleanup / an event handler without re-subscribing on every
+  // keystroke.
+  //
+  // P33-F-14: `data` stays CANONICAL on purpose — updateField/commitField read it
+  // for P32-5 invalidation and blur canonicalization. `persistedData` is the
+  // draft-only projection that also carries the P33-F-01 raw buffers.
+  const latest = useRef({
+    data,
+    // Placeholder: `persistedData` is declared further down (the autosave effect
+    // depends on it, so it must exist before that effect). On the first render
+    // the two are structurally identical anyway, and the mirror effect below
+    // overwrites this before any flush handler can read it.
+    persistedData: data,
+    step,
+    confirmedFields,
+    draftContext: DRAFT_CONTEXT_NEW,
+  });
+
+  // P32-1: identity of the last draft snapshot we decided is persisted.
+  // Autosave runs only while the wizard state differs from it, which keeps
+  // "nothing typed" / "just restored" / "just discarded" / "just finalized"
+  // states write-free.
+  const persistedFingerprint = useRef<string | null>(null);
+  // P32-1: true while the current state is NOT in storage yet. Drives the
+  // unload guard — no browser dialog appears once the draft is safe.
+  const unsavedChanges = useRef(false);
+  // P32-3: synchronous guard — a second/third click must be ignored even
+  // inside one tick, before React re-renders the disabled button.
+  const finalizeStarted = useRef(false);
+  // P32-FIX-CORRECTION (F-01): handle of the pending debounced autosave.
+  // Finalize does not unmount the page synchronously (router.push resolves
+  // asynchronously and the preview route can render slowly), so a scheduled
+  // write would fire AFTER draftStore.remove() and recreate the draft of an
+  // already created resume. The timer is cancelled synchronously on success.
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic token of the newest scheduled autosave. The callback writes only
+  // while it is still the current one — clearTimeout cannot un-queue a callback
+  // that has already been handed to the task queue, so the generation is
+  // re-checked inside the callback itself.
+  const autosaveGeneration = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -93,13 +156,25 @@ export default function WizardClient() {
           draftStore.get(draftKeyFor(editResumeId)),
         );
         if (savedDraft) {
+          const confirmed = new Set(savedDraft.confirmedFields);
           setData(savedDraft.data);
           setStep(savedDraft.step as WizardStep);
-          setConfirmedFields(new Set(savedDraft.confirmedFields));
+          setConfirmedFields(confirmed);
+          persistedFingerprint.current = draftFingerprint(
+            savedDraft.data,
+            savedDraft.step,
+            confirmed,
+          );
         } else {
+          const confirmed = new Set(loaded.record.confirmedFields);
           setData(loaded.wizardData);
           setStep(1);
-          setConfirmedFields(new Set(loaded.record.confirmedFields));
+          setConfirmedFields(confirmed);
+          persistedFingerprint.current = draftFingerprint(
+            loaded.wizardData,
+            1,
+            confirmed,
+          );
         }
         setBooted(true);
         return;
@@ -111,21 +186,258 @@ export default function WizardClient() {
     }
     const savedDraft = normalizeDraft(draftStore.get(draftKeyFor(DRAFT_CONTEXT_NEW)));
     if (savedDraft) {
+      const confirmed = new Set(savedDraft.confirmedFields);
       setData(savedDraft.data);
       setStep(savedDraft.step as WizardStep);
-      setConfirmedFields(new Set(savedDraft.confirmedFields));
+      setConfirmedFields(confirmed);
+      persistedFingerprint.current = draftFingerprint(
+        savedDraft.data,
+        savedDraft.step,
+        confirmed,
+      );
+      // P32-6: a restored draft must be visible and discardable, otherwise
+      // "+ Создать с нуля" silently continues a half-done resume.
+      setRestoredDraft({ step: savedDraft.step });
+    } else {
+      persistedFingerprint.current = draftFingerprint(
+        createDefaultWizardData(),
+        1,
+        new Set<string>(),
+      );
     }
     setBooted(true);
   }, [editResumeId]);
 
+  // ---------- P33-F-01: raw editing text for the multi-value fields ----------
+  //
+  // These two were the last controlled inputs whose value was re-serialized
+  // from the PARSED array on every keystroke:
+  //
+  //   value={data.languages.join(", ")}  onChange={v.split(",")…}      (step 6)
+  //   value={achievementsToText(…)}     onChange={parseAchievements(v)} (step 3)
+  //
+  // A parse drops exactly the characters the user is still typing — the comma
+  // and the space after it in "Русский, Английский", every space in
+  // "Growth up 30%" — so the controlled round-trip destroyed them and the field
+  // merged the words ("РусскийАнглийский", "Growthup30%").
+  //
+  // The raw editing text is now the source of truth for the DISPLAYED value and
+  // the canonical string[] is written on blur only. Nothing else changes: the
+  // schema is still string[], the arrays are still normalized by the same
+  // helpers, the preview format and the AI/matching contracts are untouched,
+  // and a restored draft still renders from its canonical arrays.
+  //
+  // P33-F-14 NOTE: this block is declared ABOVE the draft machinery on purpose.
+  // `persistedData` below feeds the autosave effect's dependency list, and a
+  // `useMemo` must be initialized before the effects that read it — JavaScript
+  // temporal-dead-zone rules make the reverse order a ReferenceError. The block
+  // is self-contained (it only closes over `data`/`setData`), so moving it is
+  // behavior-neutral.
+
+  /** Comma-separated languages text the user is editing right now. */
+  const [languagesText, setLanguagesText] = useState("");
+  // Latest text, so the blur handler needs no per-keystroke re-subscription.
+  const languagesTextRef = useRef("");
+  // The array `languagesText` was derived from. A NEW reference means the
+  // canonical value was replaced from outside this field (draft restore,
+  // discarded draft, our own blur commit) and the text must be re-derived.
+  const languagesSource = useRef<string[] | null>(null);
+
+  useEffect(() => {
+    if (languagesSource.current === data.languages) return;
+    languagesSource.current = data.languages;
+    const text = data.languages.join(", ");
+    languagesTextRef.current = text;
+    setLanguagesText(text);
+  }, [data.languages]);
+
+  const onLanguagesChange = useCallback((raw: string) => {
+    // P32-4 contract: control characters are stripped, the user's spaces and
+    // commas are not.
+    const text = sanitizeTextInput(raw);
+    languagesTextRef.current = text;
+    setLanguagesText(text);
+  }, []);
+
+  // Canonical value on blur — same split/trim/drop-empties the field always
+  // used, just no longer re-run on every keystroke.
+  const commitLanguages = useCallback(() => {
+    setData((prev) => ({
+      ...prev,
+      languages: parseLanguagesText(languagesTextRef.current),
+    }));
+  }, []);
+
+  /** Raw achievements textarea text per work-entry id. */
+  const [achievementsText, setAchievementsText] = useState<Record<string, string>>({});
+  const achievementsTextRef = useRef<Record<string, string>>({});
+  // Same contract as languagesSource, per work entry: the achievements array
+  // the current text was derived from.
+  const achievementsSource = useRef<Record<string, string[]>>({});
+
+  useEffect(() => {
+    const currentText = achievementsTextRef.current;
+    const currentSource = achievementsSource.current;
+    const nextText: Record<string, string> = {};
+    const nextSource: Record<string, string[]> = {};
+    let changed = false;
+    for (const work of data.workExperience) {
+      const sameSource = currentSource[work.id] === work.achievements;
+      // Editing another field of the same job keeps the achievements ARRAY
+      // identity, so only a replaced array re-derives the text.
+      const text = sameSource
+        ? (currentText[work.id] ?? "")
+        : achievementsToText(work.achievements);
+      if (!sameSource || currentText[work.id] !== text) changed = true;
+      nextText[work.id] = text;
+      nextSource[work.id] = work.achievements;
+    }
+    // A removed job must not leave its text behind.
+    if (Object.keys(currentText).length !== Object.keys(nextText).length) {
+      changed = true;
+    }
+    if (!changed) return;
+    achievementsTextRef.current = nextText;
+    achievementsSource.current = nextSource;
+    setAchievementsText(nextText);
+  }, [data.workExperience]);
+
+  const onAchievementsChange = useCallback((workId: string, raw: string) => {
+    // P32-4 contract: control characters are stripped; spaces and the newline
+    // the user pressed are not (sanitizeTextInput keeps \t \n \r).
+    const text = sanitizeTextInput(raw);
+    const next = { ...achievementsTextRef.current, [workId]: text };
+    achievementsTextRef.current = next;
+    setAchievementsText(next);
+  }, []);
+
+  // Canonical value on blur — the unchanged P9.3 helper.
+  const commitAchievements = useCallback((workId: string) => {
+    const parsed = parseAchievements(achievementsTextRef.current[workId] ?? "");
+    setData((prev) => ({
+      ...prev,
+      workExperience: prev.workExperience.map((w) =>
+        w.id === workId ? { ...w, achievements: parsed } : w,
+      ),
+    }));
+  }, []);
+
+  // ---------- P33-F-14: derived DRAFT snapshot ----------
+  //
+  // P33-F-01 moved these two fields to raw editing buffers, so typing no longer
+  // mutates `data` — which is exactly what the P32-1 autosave watches. The
+  // debounced autosave therefore never re-ran, and a reload lost everything
+  // typed since the last blur.
+  //
+  // This memo is a PERSISTENCE-ONLY projection of the raw buffers:
+  //   - it NEVER becomes a rendered input value (the inputs read languagesText /
+  //     achievementsText);
+  //   - it NEVER replaces canonical `data`, which still changes only on blur;
+  //   - it is NEVER read by finalize / preview / AI / HH, which keep using `data`.
+  //
+  // Restoring from the draft re-derives the buffers from these arrays, so the
+  // round-trip is SEMANTIC: normalized text survives byte-for-byte
+  // ("Русский, Английский", a well-formed multiline achievements block), while
+  // deliberately un-normalized intermediate text is canonicalized on restore.
+  // Storing the raw strings would need a draft-schema change, which is out of
+  // scope by decision.
+  const persistedData = useMemo<WizardData>(
+    () => ({
+      ...data,
+      languages: parseLanguagesText(languagesText),
+      workExperience: data.workExperience.map((work) => {
+        const raw = achievementsText[work.id];
+        // A work entry the sync effect has not seen yet keeps its canonical
+        // array as-is (legacy drafts may carry `achievements: undefined`).
+        return raw === undefined
+          ? work
+          : { ...work, achievements: parseAchievements(raw) };
+      }),
+    }),
+    [data, languagesText, achievementsText],
+  );
+
+  // Mirrors both snapshots for the flush handlers / event callbacks that run
+  // outside the render pass. Declared here because its dependency list reads
+  // `persistedData` (P33-F-14).
+  useEffect(() => {
+    latest.current = {
+      data,
+      persistedData,
+      step,
+      confirmedFields,
+      draftContext: editMode && currentResumeId ? currentResumeId : DRAFT_CONTEXT_NEW,
+    };
+  }, [data, persistedData, step, confirmedFields, editMode, currentResumeId]);
+
   const draftContext =
     editMode && currentResumeId ? currentResumeId : DRAFT_CONTEXT_NEW;
+
+  // P32-1: one write path for every draft save (explicit button, autosave,
+  // unmount flush) — keeps the failure contract of P14-F2 intact.
+  const writeDraft = useCallback(
+    (
+      context: string,
+      state: { data: WizardData; step: number; confirmedFields: Set<string> },
+    ): boolean => {
+      const saved = persistDraft(
+        draftStore,
+        context,
+        state.data,
+        state.step,
+        state.confirmedFields,
+      );
+      if (saved) {
+        persistedFingerprint.current = draftFingerprint(
+          state.data,
+          state.step,
+          state.confirmedFields,
+        );
+        unsavedChanges.current = false;
+      }
+      return saved;
+    },
+    [],
+  );
+
+  // P32-FIX-CORRECTION (F-01): synchronously drop the pending debounced
+  // autosave. Two layers, because clearTimeout alone is not enough:
+  //   1. clearTimeout + drop the handle — the normal case;
+  //   2. bump the generation — the callback re-checks it before writing, so a
+  //      timer that was already handed to the task queue still cannot write.
+  const cancelPendingAutosave = useCallback(() => {
+    autosaveGeneration.current += 1;
+    if (autosaveTimer.current) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+    }
+  }, []);
+
+  // P32-1 + P32-3: after a successful finalize the draft is intentionally gone.
+  // Cancelling the pending autosave and marking the current state as settled
+  // keeps both the debounce and the unmount flush from resurrecting a draft for
+  // an already finalized resume, and keeps the unload guard silent during the
+  // navigation to the preview.
+  const markDraftSettled = useCallback(() => {
+    cancelPendingAutosave();
+    const state = latest.current;
+    // P33-F-14: fingerprint the SAME snapshot the autosave gate uses, otherwise
+    // a post-finalize comparison could still see a difference and re-fire a
+    // write against a draft that was intentionally removed.
+    persistedFingerprint.current = draftFingerprint(
+      state.persistedData,
+      state.step,
+      state.confirmedFields,
+    );
+    unsavedChanges.current = false;
+  }, [cancelPendingAutosave]);
 
   // P14-F2: persistence errors (QuotaExceeded/SecurityError) are visible —
   // draft is reported as saved only after a successful write (P10.6 F1).
   const saveDraft = useCallback(() => {
-    const saved = persistDraft(draftStore, draftContext, data, step, confirmedFields);
-    if (!saved) {
+    // P33-F-14: the draft carries the raw editor buffers too, so the explicit
+    // save cannot drop what the user has typed but not yet blurred.
+    if (!writeDraft(draftContext, { data: persistedData, step, confirmedFields })) {
       setSaveError(
         "Не удалось сохранить черновик. Проверьте свободное место в браузере и попробуйте снова — данные формы не потеряны.",
       );
@@ -134,11 +446,102 @@ export default function WizardClient() {
     setSaveError("");
     setDraftSaved(true);
     draftSavedTimer.current = setTimeout(() => setDraftSaved(false), 2000);
-  }, [data, step, confirmedFields, draftContext]);
+  }, [writeDraft, draftContext, persistedData, step, confirmedFields]);
+
+  // P32-1: debounced autosave. Writes the draft envelope (data + step +
+  // confirmedFields) after the user stops typing, so navigating away or
+  // reloading cannot lose the wizard. It never creates a resume, a version or
+  // an analysis — only draft state.
+useEffect(() => {
+    if (!booted) return;
+    // P33-F-14: gate on the derived draft snapshot, not on canonical `data`.
+    // Typing in the P33-F-01 raw buffers changes `persistedData` (and nothing
+    // else), so this is what makes the debounce restart while the user types —
+    // the rendered inputs keep reading the raw buffers and stay untouched.
+    const fingerprint = draftFingerprint(persistedData, step, confirmedFields);
+    if (fingerprint === persistedFingerprint.current) {
+      unsavedChanges.current = false;
+      return;
+    }
+    unsavedChanges.current = true;
+    // Every schedule is a new generation: an older queued callback sees a
+    // mismatch and returns without writing.
+    const generation = ++autosaveGeneration.current;
+    const timer = setTimeout(() => {
+      autosaveTimer.current = null;
+      // P32-FIX-CORRECTION: the wizard may have been finalized (or discarded)
+      // between scheduling and firing. A cleared timer cannot be un-queued, so the
+      // state is re-validated here before touching storage.
+      if (generation !== autosaveGeneration.current) return;
+      // Failures stay silent here on purpose: the explicit "Сохранить
+      // черновик" button and the unload guard keep P14-F2's visible-error
+      // contract for the user-driven save.
+      writeDraft(draftContext, { data: persistedData, step, confirmedFields });
+    }, DRAFT_AUTOSAVE_DEBOUNCE_MS);
+    autosaveTimer.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (autosaveTimer.current === timer) autosaveTimer.current = null;
+    };
+  }, [booted, persistedData, step, confirmedFields, draftContext, writeDraft]);
+
+  // P32-1: client-side navigation unmounts this page without firing
+  // beforeunload — flush the pending draft there so the data is already safe.
+  useEffect(() => {
+    return () => {
+      if (!unsavedChanges.current) return;
+      const state = latest.current;
+      // P33-F-14: pass the draft snapshot explicitly. `state` also carries the
+      // canonical `data` key, which no longer holds the raw buffers — handing the
+      // whole object over would silently persist the pre-blur canonical arrays
+      // and lose the text typed inside the debounce window.
+      writeDraft(state.draftContext, {
+        data: state.persistedData,
+        step: state.step,
+        confirmedFields: state.confirmedFields,
+      });
+    };
+  }, [writeDraft]);
+
+  // P32-1: reload / tab close. A reload destroys the JS context WITHOUT running
+  // React cleanup, so the debounced write can still be pending. The handler
+  // flushes it synchronously and asks the user to confirm only when that write
+  // actually fails — no intrusive dialog once the draft is safe, and none after
+  // a successful finalize (nothing is pending then).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!unsavedChanges.current) return;
+      const state = latest.current;
+      // P33-F-14: same reason as the unmount flush — the draft snapshot, not the
+      // canonical `data`, is what must survive a reload/tab close.
+      const saved = writeDraft(state.draftContext, {
+        data: state.persistedData,
+        step: state.step,
+        confirmedFields: state.confirmedFields,
+      });
+      if (saved) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.onbeforeunload = handleBeforeUnload;
+    return () => {
+      window.onbeforeunload = null;
+    };
+  }, [writeDraft]);
 
   const updateField = useCallback(
     (field: keyof WizardData, value: string) => {
-      setData((prev) => ({ ...prev, [field]: sanitizeText(value) }));
+      // P32-4: typing preserves the user's characters (including the space
+      // they just typed); control characters are still stripped.
+      const clean = sanitizeTextInput(value);
+      const previous = latest.current.data[field];
+      if (typeof previous === "string") {
+        setConfirmedFields((prev) =>
+          invalidateConfirmation(prev, field, previous, clean),
+        );
+      }
+      setData((prev) => ({ ...prev, [field]: clean }));
       setErrors((prev) => {
         const next = { ...prev };
         delete next[field];
@@ -147,6 +550,39 @@ export default function WizardClient() {
     },
     [],
   );
+
+  // P32-4: canonical value on blur — the trimming sanitizeText used to do on
+  // every keystroke happens once, when the user leaves the field.
+  const commitField = useCallback(
+    (field: keyof WizardData) => {
+      const current = latest.current.data[field];
+      if (typeof current !== "string") return;
+      const canonical = sanitizeText(current);
+      if (canonical === current) return;
+      updateField(field, canonical);
+    },
+    [updateField],
+  );
+
+  // P32-6: drop the creation draft and start from a blank wizard. Only the
+  // DRAFT_CONTEXT_NEW key is touched — an edit draft of an existing resume
+  // lives under resume-draft:<id> and must survive.
+  const discardNewDraft = useCallback(() => {
+    const confirmed = window.confirm(
+      "Удалить сохранённый черновик?\n\nВведённые данные будут потеряны.",
+    );
+    if (!confirmed) return;
+    discardDraft(draftStore, DRAFT_CONTEXT_NEW);
+    const blank = createDefaultWizardData();
+    setData(blank);
+    setStep(1);
+    setConfirmedFields(new Set<string>());
+    setErrors({});
+    setSaveError("");
+    setRestoredDraft(null);
+    persistedFingerprint.current = draftFingerprint(blank, 1, new Set<string>());
+    unsavedChanges.current = false;
+  }, []);
 
   const goNext = useCallback(() => {
     const result = validateWizardStep(step, data);
@@ -175,8 +611,15 @@ export default function WizardClient() {
   }, []);
 
   const handleFinalize = useCallback(() => {
+    // P32-3: the guard lives in the handler, not only in `disabled`. Two or
+    // three fast clicks used to run the whole finalize twice/thrice and create
+    // duplicate resumes; the ref flips synchronously, before React re-renders.
+    if (finalizeStarted.current) return;
     const check = canFinalize(data, confirmedFields);
     if (!check.allowed) return;
+
+    finalizeStarted.current = true;
+    setFinalizing(true);
 
     // P10.6 F1: persistence errors (QuotaExceeded/SecurityError) обязаны быть
     // видимыми пользователю, а не молча обрывать flow. Navigation — только
@@ -186,6 +629,9 @@ export default function WizardClient() {
         const existing = getResumeRecord(currentResumeId);
         if (existing) {
           createNewVersion(data, existing, confirmedFields);
+          // Settle FIRST (cancels the pending autosave), then drop the draft:
+          // a timer firing between the two must not be able to recreate it.
+          markDraftSettled();
           draftStore.remove(draftKeyFor(currentResumeId));
           router.push(`/resume/${currentResumeId}/preview`);
           return;
@@ -193,14 +639,17 @@ export default function WizardClient() {
       }
 
       const { record } = finalizeResume(data, confirmedFields);
+      markDraftSettled();
       draftStore.remove(draftKeyFor(DRAFT_CONTEXT_NEW));
       router.push(`/resume/${record.id}/preview`);
     } catch {
+      finalizeStarted.current = false;
+      setFinalizing(false);
       setSaveError(
         "Не удалось сохранить резюме. Проверьте свободное место в браузере и попробуйте снова — данные формы не потеряны.",
       );
     }
-  }, [data, confirmedFields, router, editMode, currentResumeId]);
+  }, [data, confirmedFields, router, editMode, currentResumeId, markDraftSettled]);
 
   // ---------- Work experience helpers ----------
   const addWork = useCallback(() => {
@@ -344,6 +793,19 @@ export default function WizardClient() {
         </div>
       )}
 
+      {restoredDraft && !editMode && (
+        <div className="wizard-toast" style={{ background: "#fef3c7", color: "#92400e" }}>
+          Восстановлен сохранённый черновик (шаг {restoredDraft.step} из {TOTAL_STEPS}).{" "}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={discardNewDraft}
+          >
+            Начать заново
+          </button>
+        </div>
+      )}
+
       <WizardLayout
         title={stepTitle}
         stepNumber={step}
@@ -355,6 +817,7 @@ export default function WizardClient() {
         canGoNext={canProceedFrom(step, !isLastStepBlocking())}
         nextLabel={step === 6 ? "Перейти к просмотру →" : undefined}
         isLastStep={step === 8}
+        finalizing={finalizing}
         onFinalize={handleFinalize}
       >
         {step === 1 && renderStep1()}
@@ -388,6 +851,7 @@ export default function WizardClient() {
           required
           placeholder="Иван"
           onChange={(v) => updateField("firstName", v)}
+          onBlur={() => commitField("firstName")}
         />
         <FormField
           label="Фамилия"
@@ -397,6 +861,7 @@ export default function WizardClient() {
           required
           placeholder="Иванов"
           onChange={(v) => updateField("lastName", v)}
+          onBlur={() => commitField("lastName")}
         />
         <FormField
           label="Отчество"
@@ -404,6 +869,7 @@ export default function WizardClient() {
           value={data.middleName}
           placeholder="Иванович (необязательно)"
           onChange={(v) => updateField("middleName", v)}
+          onBlur={() => commitField("middleName")}
         />
         <FormField
           label="Город"
@@ -413,6 +879,7 @@ export default function WizardClient() {
           required
           placeholder="Москва"
           onChange={(v) => updateField("city", v)}
+          onBlur={() => commitField("city")}
         />
         <FormField
           label="Телефон"
@@ -423,6 +890,7 @@ export default function WizardClient() {
           required
           placeholder="+7 (999) 123-45-67"
           onChange={(v) => updateField("phone", v)}
+          onBlur={() => commitField("phone")}
           onConfirm={() => confirmField("phone")}
           confirmationLevel={
             confirmedFields.has("phone")
@@ -441,6 +909,7 @@ export default function WizardClient() {
           required
           placeholder="ivan@example.com"
           onChange={(v) => updateField("email", v)}
+          onBlur={() => commitField("email")}
           onConfirm={() => confirmField("email")}
           confirmationLevel={
             confirmedFields.has("email")
@@ -468,6 +937,7 @@ export default function WizardClient() {
           required
           placeholder="Frontend Developer"
           onChange={(v) => updateField("desiredPosition", v)}
+          onBlur={() => commitField("desiredPosition")}
           onConfirm={() => confirmField("desiredPosition")}
           confirmationLevel={
             confirmedFields.has("desiredPosition")
@@ -483,6 +953,7 @@ export default function WizardClient() {
           value={data.desiredSalary}
           placeholder="от 150 000 ₽ (необязательно)"
           onChange={(v) => updateField("desiredSalary", v)}
+          onBlur={() => commitField("desiredSalary")}
         />
         <FormField
           label="Формат работы"
@@ -587,10 +1058,11 @@ export default function WizardClient() {
               label="Достижения"
               name={`work-${work.id}-achievements`}
               type="textarea"
-              value={achievementsToText(work.achievements)}
+              value={achievementsText[work.id] ?? ""}
               placeholder={"По одному достижению на строку\nНапример: Увеличил продажи на 30%"}
               rows={3}
-              onChange={(v) => updateWork(work.id, "achievements", parseAchievements(v))}
+              onChange={(v) => onAchievementsChange(work.id, v)}
+              onBlur={() => commitAchievements(work.id)}
             />
             <div className="wizard-hint-box">
               <p className="wizard-hint-small">
@@ -783,21 +1255,15 @@ export default function WizardClient() {
           placeholder="Кратко расскажите о вашем опыте и целях (необязательно)"
           rows={4}
           onChange={(v) => updateField("summary", v)}
+          onBlur={() => commitField("summary")}
         />
         <FormField
           label="Языки"
           name="languages"
-          value={data.languages.join(", ")}
+          value={languagesText}
           placeholder="Русский, Английский (через запятую)"
-          onChange={(v) =>
-            setData((prev) => ({
-              ...prev,
-              languages: v
-                .split(",")
-                .map((l) => l.trim())
-                .filter(Boolean),
-            }))
-          }
+          onChange={onLanguagesChange}
+          onBlur={commitLanguages}
         />
       </div>
     );
@@ -807,6 +1273,13 @@ export default function WizardClient() {
     return (
       <div className="preview-section">
         <h3>Предварительный просмотр резюме</h3>
+
+        {/* P32-2: the fact-check gate no longer stops the flow here — the next
+            step is where unconfirmed fields are listed and explained. */}
+        <p className="wizard-hint">
+          Проверка фактов и создание резюме — на следующем шаге. Там будут
+          перечислены поля, которые нужно подтвердить.
+        </p>
 
         <div className="preview-block">
           <h4>Личные данные</h4>
